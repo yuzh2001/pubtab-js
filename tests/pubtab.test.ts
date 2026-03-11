@@ -154,6 +154,66 @@ A & B \\
     expect(wb.worksheets[0].getCell('A2').value).toBe(3);
   });
 
+  it('xlsx2tex：目录输入时 output 不能是 .tex 文件路径', async () => {
+    const dir = await mkTmpDir('pubtab-ts-');
+    const inDir = path.join(dir, 'xlsx-in');
+    await fs.mkdir(inDir, { recursive: true });
+
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('S1').getCell('A1').value = 'X';
+    await wb.xlsx.writeFile(path.join(inDir, 'a.xlsx'));
+
+    const outFile = path.join(dir, 'out.tex');
+    await expect(xlsx2tex(inDir, outFile)).rejects.toThrow(/output.*directory/i);
+  });
+
+  it('texToExcel：目录输入时 output 不能是 .xlsx 文件路径', async () => {
+    const dir = await mkTmpDir('pubtab-ts-');
+    const inDir = path.join(dir, 'tex-in');
+    await fs.mkdir(inDir, { recursive: true });
+
+    const tex = String.raw`\begin{tabular}{c}
+A \\
+\end{tabular}`;
+    await fs.writeFile(path.join(inDir, 'a.tex'), tex, 'utf8');
+
+    const outFile = path.join(dir, 'out.xlsx');
+    await expect(texToExcel(inDir, outFile)).rejects.toThrow(/output.*directory/i);
+  });
+
+  it('xlsx2tex：单文件输入时 output 允许传目录并按输入名落盘', async () => {
+    const dir = await mkTmpDir('pubtab-ts-');
+    const xlsxPath = path.join(dir, 'one.xlsx');
+    const outDir = path.join(dir, 'out');
+
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('S1').getCell('A1').value = 'ONLY';
+    await wb.xlsx.writeFile(xlsxPath);
+
+    await xlsx2tex(xlsxPath, outDir);
+
+    const outTex = path.join(outDir, 'one.tex');
+    expect(await fs.readFile(outTex, 'utf8')).toContain('ONLY');
+  });
+
+  it('texToExcel：单文件输入时 output 允许传目录并按输入名落盘', async () => {
+    const dir = await mkTmpDir('pubtab-ts-');
+    const texPath = path.join(dir, 'one.tex');
+    const outDir = path.join(dir, 'out');
+
+    const tex = String.raw`\begin{tabular}{c}
+Z \\
+\end{tabular}`;
+    await fs.writeFile(texPath, tex, 'utf8');
+
+    await texToExcel(texPath, outDir);
+
+    const outXlsx = path.join(outDir, 'one.xlsx');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(outXlsx);
+    expect(wb.worksheets[0].getCell('A1').value).toBe('Z');
+  });
+
   it('readTex 与 render 的最小往返保持结构', () => {
     const src = String.raw`\begin{tabular}{cc}
 \toprule

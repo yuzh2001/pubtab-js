@@ -17,6 +17,10 @@
 - 已实现：未指定 `sheet` 时默认导出全部工作表为 `*_sheetNN.tex`。
 - 已实现：指定 `sheet`（名称或索引）时只导出单个 `.tex`。
 - 已实现：目录输入批量转换（目录内 `.xlsx` -> 输出目录内 `.tex`）。
+- 已实现：`output` 既可以是文件路径（`.tex`），也可以是目录：
+  - 单文件输入：若 `output` 不是 `.tex`，则视为目录并输出为 `output/<inputStem>.tex`。
+  - 多 sheet 导出：若 `output` 是目录则输出为 `output/<inputStem>_sheetNN.tex`；若 `output` 是 `.tex` 文件则输出为 `<outputDir>/<outputStem>_sheetNN.tex`。
+- 已实现：目录输入时 `output` 必须为目录（传 `*.tex` 会报错）。
 - 已实现：合并单元格“非 master 置空”的语义（避免重复值）。
 - 已实现：输出头部包含注释版 package hints（`booktabs/multirow/xcolor`，resizebox 时额外包含 `graphicx`）。
 - TODO：支持 `.xls` 输入（原版支持）。
@@ -33,11 +37,13 @@
 - 已实现：解包常见包装器（`textbf/textit/underline/textcolor/cellcolor/makecell/diagbox` 的保守剥壳），用于提取值。
 - 已实现：写出 `.xlsx`（基于 `exceljs`）。
 - 已实现：目录输入批量转换（目录内 `.tex` -> 输出目录内 `.xlsx`）。
+- 已实现：目录输入时 `output` 必须为目录（传 `*.xlsx` 会报错）。
+- 已实现：单文件输入时 `output` 可为目录（输出为 `output/<inputStem>.xlsx`）。
+- 已实现：支持单列表格（仅 1 列时不要求行内出现 `&`）。
 - TODO：单个 `.tex` 内多表解析并写入多 sheet（原版支持）。
 - TODO：完整样式回写到 Excel（字体/颜色/背景色/旋转/富文本分段等）。
 - TODO：强健的 tex 容错解析（处理 docx/OCR 导致的异常反斜杠、转义分隔符、嵌套 tabular 等；原版有大量测试覆盖）。
 - TODO：`definecolor/newcommand` 宏展开与颜色模型解析（原版支持）。
-- TODO：目录输入时的参数校验（例如：目录输入要求输出为目录；原版有测试覆盖）。
 
 ### Preview（tex -> PNG/PDF）
 
@@ -90,8 +96,6 @@ npm run build
 
 - `test_tex_to_xlsx_dimensions / values_match / merged_cells`：从 `.tex` 生成 `.xlsx` 的维度、值、合并范围对齐。
 - `test_xlsx_to_tex_roundtrip`：`.xlsx -> .tex -> (parse) TableData` 的维度一致（以及更强的值一致回归）。
-- `test_xlsx2tex_directory_input_requires_output_directory`：目录输入时 output 参数校验。
-- `test_tex2xlsx_directory_input_requires_output_directory`：目录输入时 output 参数校验。
 - `test_preview_*` 与 `test_preview_download_*`：preview 管线与 TinyTeX/缺包安装相关（我们未实现 preview）。
 - `test_read_excel_trims_*`：Excel 读取裁剪逻辑（我们未实现裁剪）。
 - `test_tex_reader_*` 大量容错与语义解析用例（我们目前只做最小解析与保守剥壳）。

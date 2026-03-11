@@ -38,4 +38,5 @@ export interface RenderOptions {
 
 export interface Xlsx2TexOptions extends RenderOptions {
   sheet?: string | number;
+  headerRows?: number | 'auto';
 }
