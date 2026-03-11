@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import ExcelJS from 'exceljs';
 
-import type { Cell, TableData, Xlsx2TexOptions } from './models.js';
+import type { Cell, RichSegment, TableData, Xlsx2TexOptions } from './models.js';
 import { readTex } from './texReader.js';
 import { render } from './renderer.js';
 
@@ -21,75 +21,239 @@ function isEmptyValue(v: unknown): boolean {
   return v == null || v === '';
 }
 
-function minColsDueToHeaderMerges(ws: ExcelJS.Worksheet): number {
-  const merges = (ws.model as { merges?: string[] } | undefined)?.merges ?? [];
-  let minKeep = 0;
-  for (const raw of merges) {
-    const m = raw.match(/^([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$/u);
-    if (!m) continue;
-    const startCol = colLettersToNumber(m[1]);
-    const startRow = Number(m[2]);
-    const endCol = colLettersToNumber(m[3]);
-    if (startCol <= 0 || endCol <= 0 || !Number.isFinite(startRow)) continue;
-    if (startRow !== 1) continue;
-    const masterValue = ws.getCell(startRow, startCol).value;
-    if (isEmptyValue(masterValue)) continue;
-    minKeep = Math.max(minKeep, endCol);
+function isCellPayload(cell: Cell | undefined): boolean {
+  if (!cell) return false;
+  const v = cell.value;
+  if (typeof v === 'string') {
+    if (v.trim()) return true;
+  } else if (v !== '' && v != null) {
+    return true;
   }
-  return minKeep;
+  if (cell.richSegments && cell.richSegments.length > 0) return true;
+  if (cell.style.diagbox && cell.style.diagbox.length > 0) return true;
+  return false;
+}
+
+type MergeInfo = { mr: number; mc: number; rowspan: number; colspan: number };
+
+function parseA1(addr: string): { row: number; col: number } | null {
+  const m = addr.match(/^([A-Za-z]+)(\d+)$/u);
+  if (!m) return null;
+  const col = colLettersToNumber(m[1]);
+  const row = Number(m[2]);
+  if (!Number.isFinite(row) || row <= 0 || col <= 0) return null;
+  return { row, col };
+}
+
+function buildMergeMap(ws: ExcelJS.Worksheet): Map<string, MergeInfo> {
+  const merges = (ws.model as { merges?: string[] } | undefined)?.merges ?? [];
+  const map = new Map<string, MergeInfo>();
+  for (const raw of merges) {
+    const m = raw.match(/^([A-Za-z]+\d+):([A-Za-z]+\d+)$/u);
+    if (!m) continue;
+    const a = parseA1(m[1]);
+    const b = parseA1(m[2]);
+    if (!a || !b) continue;
+    const r1 = Math.min(a.row, b.row);
+    const r2 = Math.max(a.row, b.row);
+    const c1 = Math.min(a.col, b.col);
+    const c2 = Math.max(a.col, b.col);
+    const rowspan = r2 - r1 + 1;
+    const colspan = c2 - c1 + 1;
+    for (let r = r1; r <= r2; r += 1) {
+      for (let c = c1; c <= c2; c += 1) {
+        map.set(`${r},${c}`, { mr: r1, mc: c1, rowspan, colspan });
+      }
+    }
+  }
+  return map;
+}
+
+function excelArgbToHex(argb: string | undefined | null): string | null {
+  if (!argb || typeof argb !== 'string') return null;
+  const a = argb.trim();
+  // ExcelJS tends to expose ARGB like 'FFRRGGBB'
+  if (!/^[0-9a-fA-F]{8}$/.test(a)) return null;
+  if (a === '00000000') return null;
+  return `#${a.slice(-6).toUpperCase()}`;
+}
+
+function extractRichSegmentsFromExcelJS(value: unknown): RichSegment[] | null {
+  const v = value as { richText?: Array<{ text?: string; font?: any }> } | null | undefined;
+  if (!v || typeof v !== 'object' || !Array.isArray(v.richText)) return null;
+  const segs: RichSegment[] = [];
+  let hasFormatting = false;
+  for (const b of v.richText) {
+    const text = String(b?.text ?? '');
+    const font = b?.font ?? {};
+    const color = excelArgbToHex(font?.color?.argb ?? font?.color?.value);
+    const bold = Boolean(font?.bold);
+    const italic = Boolean(font?.italic);
+    const underline = Boolean(font?.underline);
+    if (color || bold || italic || underline) hasFormatting = true;
+    segs.push([text, color, bold, italic, underline]);
+  }
+  if (!hasFormatting || segs.length < 2) return null;
+  return segs;
+}
+
+function excelFmtToPython(fmt: string | undefined | null): string | undefined {
+  if (!fmt || fmt === 'General') return undefined;
+  let m = fmt.match(/^[#0]*\.([0]+)$/u);
+  if (m) return `.${m[1].length}f`;
+  m = fmt.match(/^[#0]*\.?([0]*)%$/u);
+  if (m) return m[1].length ? `.${m[1].length}%` : '.0%';
+  return undefined;
+}
+
+function extractStyleFromExcelJS(cell: any): Cell['style'] {
+  const style: Cell['style'] = {};
+  const font = cell?.font ?? {};
+  const align = cell?.alignment ?? {};
+  const fill = cell?.fill ?? {};
+
+  if (font.bold) style.bold = true;
+  if (font.italic) style.italic = true;
+  if (font.underline) style.underline = true;
+
+  const color = excelArgbToHex(font?.color?.argb ?? font?.color?.value);
+  if (color) style.color = color;
+
+  // Background color
+  if (fill && (fill.type === 'pattern' || fill.fillType === 'pattern')) {
+    const fg = excelArgbToHex(fill?.fgColor?.argb ?? fill?.fgColor?.value);
+    if (fg) style.bgColor = fg;
+  }
+
+  if (typeof align?.horizontal === 'string' && align.horizontal) style.alignment = align.horizontal;
+  if (typeof align?.textRotation === 'number' && Number.isFinite(align.textRotation) && align.textRotation) style.rotation = align.textRotation;
+
+  const fmt = excelFmtToPython(cell?.numFmt);
+  if (fmt) style.fmt = fmt;
+
+  return style;
+}
+
+function isNumericDiagbox(parts: string[]): boolean {
+  return parts.every((p) => {
+    const s = p.trim();
+    if (!s) return true;
+    if (s === '--') return true;
+    return /^-?\d+(\.\d+)?$/u.test(s);
+  });
+}
+
+function cellValueFromExcelJS(rawValue: unknown, richSegments: RichSegment[] | null): unknown {
+  if (richSegments) return richSegments.map((s) => s[0]).join('');
+  if (rawValue == null) return '';
+  return rawValue;
+}
+
+function trimTrailingEmptyColsLikePython(cells: Cell[][], numCols: number): number {
+  if (numCols <= 1 || cells.length === 0) return numCols;
+
+  const colHasPayload = (colIdx: number): boolean => {
+    for (const row of cells) {
+      if (colIdx < row.length && isCellPayload(row[colIdx])) return true;
+    }
+    return false;
+  };
+
+  const shrinkMasterSpanCrossing = (row: Cell[], colIdx: number): void => {
+    for (let i = 0; i < row.length; i += 1) {
+      const cell = row[i];
+      if ((cell.colspan ?? 1) <= 1) continue;
+      if (i <= colIdx && colIdx <= i + cell.colspan - 1) {
+        row[i] = { ...cell, colspan: Math.max(1, cell.colspan - 1) };
+        break;
+      }
+    }
+  };
+
+  while (numCols > 1) {
+    const last = numCols - 1;
+    if (colHasPayload(last)) break;
+    for (const row of cells) {
+      shrinkMasterSpanCrossing(row, last);
+      if (last >= 0 && last < row.length) row.splice(last, 1);
+    }
+    numCols -= 1;
+  }
+  return numCols;
 }
 
 function tableFromWorksheet(ws: ExcelJS.Worksheet, opts: Xlsx2TexOptions): TableData {
   const rowCount = Math.max(ws.rowCount || 0, ws.actualRowCount || 0);
   const colCount = Math.max(ws.columnCount || 0, ws.actualColumnCount || 0);
 
+  const mergeMap = buildMergeMap(ws);
   const rows: Cell[][] = [];
   for (let r = 1; r <= rowCount; r += 1) {
     const row: Cell[] = [];
     for (let c = 1; c <= colCount; c += 1) {
-      const cell = ws.getCell(r, c) as unknown as {
-        value: ExcelJS.CellValue | null | undefined;
-        address: string;
-        isMerged?: boolean;
-        master?: { address: string; value: ExcelJS.CellValue | null | undefined };
-      };
-      // ExcelJS returns the master value for every cell in a merged range.
-      // pubtab's semantics are closer to Excel display: only the master cell carries the value.
-      const v =
-        cell.isMerged && cell.master && cell.address !== cell.master.address
-          ? ''
-          : cell.value;
-      row.push({ value: v ?? '', style: {}, rowspan: 1, colspan: 1 });
+      const cell = ws.getCell(r, c) as any;
+      const mi = mergeMap.get(`${r},${c}`);
+      const isMerged = Boolean(mi);
+      const isMaster = !isMerged || (mi!.mr === r && mi!.mc === c);
+
+      if (isMerged && !isMaster) {
+        row.push({ value: '', style: {}, rowspan: 1, colspan: 1, richSegments: null });
+        continue;
+      }
+
+      const richSegments = extractRichSegmentsFromExcelJS(cell.value);
+      let value = cellValueFromExcelJS(cell.value, richSegments);
+      const style = extractStyleFromExcelJS(cell);
+      const rowspan = isMerged ? mi!.rowspan : 1;
+      const colspan = isMerged ? mi!.colspan : 1;
+
+      // Auto-detect diagbox: "X / Y" in top-left (non-numeric labels only).
+      if (typeof value === 'string' && value.includes(' / ') && r === 1 && c === 1) {
+        const parts = value.split(' / ', 2);
+        if (parts.length === 2 && !isNumericDiagbox(parts)) {
+          style.diagbox = parts;
+          value = '';
+        }
+      }
+
+      // Auto-detect raw LaTeX (mirror pubtab-python): if cell contains \command
+      if (typeof value === 'string' && /\\[a-zA-Z]/u.test(value)) {
+        style.rawLatex = true;
+      }
+
+      row.push({ value: value ?? '', style, rowspan, colspan, richSegments });
     }
     rows.push(row);
   }
 
-  const minKeepCols = minColsDueToHeaderMerges(ws);
-  let lastNonEmpty = 0;
-  for (let c = 0; c < colCount; c += 1) {
-    const hasAny = rows.some((r) => !isEmptyValue(r[c]?.value));
-    if (hasAny) lastNonEmpty = c + 1;
+  // Trim trailing empty rows (keep at least 1)
+  while (rows.length > 1 && rows[rows.length - 1].every((c) => isEmptyValue(c.value))) {
+    rows.pop();
   }
-  const keepCols = Math.max(1, Math.max(lastNonEmpty, minKeepCols));
-  const trimmedRows = rows.map((r) => r.slice(0, keepCols));
+  const numRows = rows.length;
+  let numCols = colCount;
+  numCols = trimTrailingEmptyColsLikePython(rows, numCols);
+  const trimmedRows = rows.map((r) => r.slice(0, numCols));
 
   let headerRows: number;
   if (typeof opts.headerRows === 'number') {
     headerRows = Math.max(0, Math.min(Math.trunc(opts.headerRows), trimmedRows.length));
   } else {
-    let count = 0;
-    for (const r of trimmedRows) {
-      const hasNumeric = r.some((c) => typeof c.value === 'number' && Number.isFinite(c.value));
-      if (hasNumeric) break;
-      count += 1;
+    // Match pubtab-python: start with first-row rowspans, then extend while inside header.
+    headerRows = trimmedRows.length === 0 ? 0 : Math.max(...trimmedRows[0].map((c) => c.rowspan || 1), 1);
+    let r = 1;
+    while (r < headerRows && r < trimmedRows.length) {
+      for (const cell of trimmedRows[r]) {
+        headerRows = Math.max(headerRows, r + (cell.rowspan || 1));
+      }
+      r += 1;
     }
-    headerRows = trimmedRows.length === 0 ? 0 : Math.max(1, Math.min(count, trimmedRows.length));
   }
 
   return {
     cells: trimmedRows,
-    numRows: trimmedRows.length,
-    numCols: keepCols,
+    numRows,
+    numCols,
     headerRows,
     groupSeparators: {},
   };
@@ -171,10 +335,75 @@ async function writeTableToExcel(table: TableData, output: string): Promise<void
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Table 1');
 
+  const toArgb = (hex: string | undefined): string | undefined => {
+    if (!hex) return undefined;
+    const h = hex.replace('#', '');
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return undefined;
+    return `FF${h.toUpperCase()}`;
+  };
+
   for (let r = 0; r < table.cells.length; r += 1) {
     const row = table.cells[r];
     for (let c = 0; c < row.length; c += 1) {
-      ws.getCell(r + 1, c + 1).value = row[c].value as ExcelJS.CellValue;
+      const cell = row[c];
+      const target = ws.getCell(r + 1, c + 1);
+
+      if (cell.richSegments && cell.richSegments.length > 1) {
+        target.value = {
+          richText: cell.richSegments.map((seg) => {
+            const [text, color, bold, italic, underline] = seg as RichSegment;
+            const argb = toArgb(color ?? '#000000') ?? 'FF000000';
+            return {
+              text,
+              font: {
+                bold: bold || undefined,
+                italic: italic || undefined,
+                underline: underline || undefined,
+                // Explicit black for uncolored segments mirrors pubtab-python's behavior and
+                // avoids segment boundary collapse when a bg fill exists.
+                color: { argb: color ? argb : 'FF000000' },
+              },
+            };
+          }),
+        } as any;
+      } else {
+        target.value = cell.value as ExcelJS.CellValue;
+      }
+
+      if (!(cell.richSegments && cell.richSegments.length > 1)) {
+        const fontColor = toArgb(cell.style.color);
+        target.font = {
+          bold: cell.style.bold || undefined,
+          italic: cell.style.italic || undefined,
+          underline: cell.style.underline ? true : undefined,
+          color: fontColor ? { argb: fontColor } : undefined,
+        } as any;
+      }
+
+      const bg = toArgb(cell.style.bgColor);
+      if (bg) {
+        target.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: bg },
+          bgColor: { argb: bg },
+        } as any;
+      }
+
+      const rotation = cell.style.rotation ?? 0;
+      const wrapText = typeof cell.value === 'string' && cell.value.includes('\n');
+      target.alignment = {
+        horizontal: cell.style.alignment as any,
+        vertical: 'middle',
+        wrapText: wrapText || undefined,
+        textRotation: rotation || undefined,
+      } as any;
+
+      if (cell.rowspan > 1 || cell.colspan > 1) {
+        const r2 = r + cell.rowspan;
+        const c2 = c + cell.colspan;
+        ws.mergeCells(r + 1, c + 1, r2, c2);
+      }
     }
   }
 

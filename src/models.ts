@@ -1,5 +1,8 @@
 export type GroupSeparators = Record<number, string | string[]> | number[];
 
+// Mirror pubtab-python: ((text, color_hex_or_None, bold, italic, underline), ...)
+export type RichSegment = [text: string, color: string | null, bold: boolean, italic: boolean, underline: boolean];
+
 export interface CellStyle {
   bold?: boolean;
   italic?: boolean;
@@ -9,6 +12,7 @@ export interface CellStyle {
   alignment?: 'left' | 'center' | 'right' | string;
   fmt?: string;
   rawLatex?: boolean;
+  diagbox?: string[]; // e.g. ["Row", "Col"]
   rotation?: number;
 }
 
@@ -17,6 +21,7 @@ export interface Cell {
   style: CellStyle;
   rowspan: number;
   colspan: number;
+  richSegments?: RichSegment[] | null;
 }
 
 export interface TableData {

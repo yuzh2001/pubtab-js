@@ -48,10 +48,12 @@ describe('xlsx2tex: trims + headerRows', () => {
 
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('S1');
+    // Align with pubtab-python: auto header_rows is derived from header rowspans, not numeric heuristics.
+    // Make a 2-row-tall header by merging A1:A2.
     ws.getCell('A1').value = 'H1';
+    ws.mergeCells('A1:A2');
     ws.getCell('B1').value = 'H2';
-    ws.getCell('A2').value = 'S1';
-    ws.getCell('B2').value = 'S2';
+    ws.getCell('B2').value = 'H2-2';
     ws.getCell('A3').value = 1;
     ws.getCell('B3').value = 2;
     await wb.xlsx.writeFile(xlsxPath);
@@ -85,4 +87,3 @@ describe('xlsx2tex: trims + headerRows', () => {
     expect(rowLinesBefore.length).toBe(1);
   });
 });
-

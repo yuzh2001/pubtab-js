@@ -27,6 +27,17 @@ export function hexToLatexColor(hex: string): string {
   return `${r},${g},${b}`;
 }
 
+export function latexRgbToHex(rgb: string): string | null {
+  const m = rgb.trim().match(/^(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})$/u);
+  if (!m) return null;
+  const r = Number(m[1]);
+  const g = Number(m[2]);
+  const b = Number(m[3]);
+  if (![r, g, b].every((n) => Number.isFinite(n) && n >= 0 && n <= 255)) return null;
+  const toHex = (n: number) => n.toString(16).padStart(2, '0').toUpperCase();
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 export function stripLatexWrappers(raw: string): string {
   // Common wrappers used by pubtab outputs.
   // Keep this conservative: we only unwrap when the whole cell is a wrapper.
@@ -40,6 +51,7 @@ export function stripLatexWrappers(raw: string): string {
     // Unwrap color wrappers first so inner style wrappers can be peeled in the same pass.
     s = s.replace(/^\\textcolor(?:\[[^\]]+\])?\{[^}]+\}\{([\s\S]*)\}$/u, '$1');
     s = s.replace(/^\\cellcolor(?:\[[^\]]+\])?\{[^}]+\}\{([\s\S]*)\}$/u, '$1');
+    s = s.replace(/^\\rotatebox(?:\[[^\]]+\])?\{[^}]+\}\{([\s\S]*)\}$/u, '$1');
     s = s.replace(/^\\textbf\{([\s\S]*)\}$/u, '$1');
     s = s.replace(/^\\textit\{([\s\S]*)\}$/u, '$1');
     s = s.replace(/^\\underline\{([\s\S]*)\}$/u, '$1');
