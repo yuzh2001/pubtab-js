@@ -48,6 +48,7 @@ export function stripLatexWrappers(raw: string): string {
     s = s.trim();
     s = s.replace(/^\\makecell\{([\s\S]*)\}$/u, (_m, inner) => inner.replace(/\\\\/g, '\n'));
     s = s.replace(/^\\diagbox\{([\s\S]*?)\}\{([\s\S]*?)\}$/u, '$1 / $2');
+    s = s.replace(/^\\var\{([\s\S]*)\}$/u, '$1');
     // Unwrap color wrappers first so inner style wrappers can be peeled in the same pass.
     s = s.replace(/^\\textcolor(?:\[[^\]]+\])?\{[^}]+\}\{([\s\S]*)\}$/u, '$1');
     s = s.replace(/^\\cellcolor(?:\[[^\]]+\])?\{[^}]+\}\{([\s\S]*)\}$/u, '$1');
@@ -55,27 +56,88 @@ export function stripLatexWrappers(raw: string): string {
     s = s.replace(/^\\textbf\{([\s\S]*)\}$/u, '$1');
     s = s.replace(/^\\textit\{([\s\S]*)\}$/u, '$1');
     s = s.replace(/^\\underline\{([\s\S]*)\}$/u, '$1');
+    s = s.replace(/^\$([\s\S]*)\$$/u, '$1');
+    s = s.replace(/\\text\{([^}]*)\}/gu, '$1');
     s = s.replace(/^\{([\s\S]*)\}$/u, '$1');
     if (s === prev) break;
   }
+
+  // Drop citations (fixture tables should keep the core label only).
+  // Regex can't reliably handle nested braces; clean up any dangling braces later.
+  s = s.replace(/~?\\cite[a-zA-Z*]*(?:\[[^\]]*\])?\{[^}]*\}/gu, '');
+
+  // Inline wrappers that frequently appear inside numeric/text cells.
+  s = s.replace(/\\var\{([\s\S]*?)\}/gu, '$1');
+  s = s.replace(/\\underline\{([\s\S]*?)\}/gu, '$1');
+  s = s.replace(/\\textbf\{([\s\S]*?)\}/gu, '$1');
+  s = s.replace(/\\textit\{([\s\S]*?)\}/gu, '$1');
+
+  // Normalize `{$\pm$0.01}` like patterns into unicode ±.
+  s = s.replace(/\{\$\s*\\pm\s*\$\s*([0-9.]+)\s*\}/gu, '±$1');
+  s = s.replace(/\$\s*\\pm\s*\$\s*([0-9.]+)/gu, '±$1');
+  s = s.replace(/\s+±/gu, '±');
+
+  // `\textemdash\` is common in captions and sometimes leaks into cells; map to unicode em dash.
+  s = s.replace(/\\textemdash\\?/gu, '—');
+
+  // Unescape common special chars used in tables.
+  s = s
+    .replace(/\\%/g, '%')
+    .replace(/\\#/g, '#')
+    .replace(/\\_/g, '_')
+    .replace(/\\&/g, '&')
+    .replace(/\\\$/g, '$')
+    .replace(/\\\{/g, '{')
+    .replace(/\\\}/g, '}');
+
+  // Remove stray braces (pubtab-python `_clean_latex` does this as a late cleanup step).
+  s = s.replace(/\{/g, '').replace(/\}/g, '');
+
+  // If citation removal left a trailing unmatched '}', drop it.
+  for (let i = 0; i < 5; i += 1) {
+    if (!s.endsWith('}')) break;
+    const opens = (s.match(/\{/gu) ?? []).length;
+    const closes = (s.match(/\}/gu) ?? []).length;
+    if (closes <= opens) break;
+    s = s.slice(0, -1).trimEnd();
+  }
+
   return s;
 }
 
 export function splitUnescaped(input: string, sep: '&' | '\\\\'): string[] {
-  if (sep === '&') {
-    const out: string[] = [];
-    let cur = '';
-    for (let i = 0; i < input.length; i += 1) {
-      const ch = input[i];
-      if (ch === '&' && input[i - 1] !== '\\') {
+  const out: string[] = [];
+  let cur = '';
+  let braceDepth = 0;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    const prev = i > 0 ? input[i - 1] : '';
+
+    if (ch === '{' && prev !== '\\') braceDepth += 1;
+    if (ch === '}' && prev !== '\\') braceDepth = Math.max(0, braceDepth - 1);
+
+    if (sep === '&') {
+      if (ch === '&' && prev !== '\\' && braceDepth === 0) {
         out.push(cur);
         cur = '';
-      } else {
-        cur += ch;
+        continue;
       }
+      cur += ch;
+      continue;
     }
-    out.push(cur);
-    return out;
+
+    // `\\` row break; do not split inside {...} (e.g. \makecell{a\\b}).
+    if (ch === '\\' && input[i + 1] === '\\' && braceDepth === 0) {
+      out.push(cur);
+      cur = '';
+      i += 1; // consume second backslash
+      continue;
+    }
+
+    cur += ch;
   }
-  return input.split(/\\\\/g);
+
+  out.push(cur);
+  return out;
 }

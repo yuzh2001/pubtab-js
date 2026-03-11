@@ -154,7 +154,19 @@ function trimTrailingEmptyColsLikePython(cells: Cell[][], numCols: number): numb
 
   const colHasPayload = (colIdx: number): boolean => {
     for (const row of cells) {
-      if (colIdx < row.length && isCellPayload(row[colIdx])) return true;
+      if (colIdx < 0 || colIdx >= row.length) continue;
+      if (isCellPayload(row[colIdx])) return true;
+
+      // Attribute payload from a horizontal placeholder to its left master when the
+      // master's colspan covers this column. This matches pubtab-python behavior.
+      for (let i = colIdx - 1; i >= 0; i -= 1) {
+        const left = row[i];
+        if ((left.colspan ?? 1) <= 1) continue;
+        if (i + (left.colspan ?? 1) - 1 >= colIdx) {
+          if (isCellPayload(left)) return true;
+          break;
+        }
+      }
     }
     return false;
   };
@@ -342,10 +354,17 @@ async function writeTableToExcel(table: TableData, output: string): Promise<void
     return `FF${h.toUpperCase()}`;
   };
 
+  const merged = new Set<string>();
+
   for (let r = 0; r < table.cells.length; r += 1) {
     const row = table.cells[r];
     for (let c = 0; c < row.length; c += 1) {
       const cell = row[c];
+      const mergedKey = `${r},${c}`;
+      if (merged.has(mergedKey)) {
+        if (cell.value === '' || cell.value == null) continue;
+        merged.delete(mergedKey);
+      }
       const target = ws.getCell(r + 1, c + 1);
 
       if (cell.richSegments && cell.richSegments.length > 1) {
@@ -400,9 +419,27 @@ async function writeTableToExcel(table: TableData, output: string): Promise<void
       } as any;
 
       if (cell.rowspan > 1 || cell.colspan > 1) {
-        const r2 = r + cell.rowspan;
-        const c2 = c + cell.colspan;
-        ws.mergeCells(r + 1, c + 1, r2, c2);
+        let actualRowspan = Math.min(cell.rowspan, table.cells.length - r);
+        if (actualRowspan > 1) {
+          for (let dr = 1; dr < actualRowspan; dr += 1) {
+            const nr = r + dr;
+            if (nr < table.cells.length && table.cells[nr][c]?.value != null && table.cells[nr][c]?.value !== '') {
+              actualRowspan = dr;
+              break;
+            }
+          }
+        }
+        const endRow = r + actualRowspan;
+        const endCol = c + cell.colspan;
+        if (endRow > r + 1 || endCol > c + 1) {
+          ws.mergeCells(r + 1, c + 1, endRow, endCol);
+        }
+        for (let mr = r; mr < r + actualRowspan; mr += 1) {
+          for (let mc = c; mc < c + cell.colspan; mc += 1) {
+            if (mr === r && mc === c) continue;
+            merged.add(`${mr},${mc}`);
+          }
+        }
       }
     }
   }

@@ -110,11 +110,8 @@ function convertColorSwitchGroups(text: string): string {
 
 function unwrapInnerTabular(text: string): string {
   // Convert in-cell tabular used for line breaks into plain content with \n.
-  // This is intentionally conservative and only targets nested tabular blocks.
-  return text.replace(
-    /\\begin\{tabular\}(?:\[[^\]]*\])?\{[^}]*\}([\s\S]*?)\\end\{tabular\}/gu,
-    (_m, body: string) => body.replace(/\\\\/g, '\n'),
-  );
+  // This must handle nested braces in column specs like `p{0.8cm}` and optional args.
+  return replaceTabularEnvs(text, (body) => body.replace(/\\\\/g, '\n'));
 }
 
 function parseFormatting(raw: string): { bold: boolean; italic: boolean; underline: boolean; text: string } {
@@ -211,16 +208,64 @@ function parseCell(raw: string): Cell {
   const style: CellStyle = {};
   let value = s;
 
-  const multiCol = value.match(/^\\multicolumn\{(\d+)\}\{[^}]*\}\{([\s\S]*)\}$/u);
-  if (multiCol) {
-    colspan = Number(multiCol[1]);
-    value = multiCol[2];
+  const parseMulticolumn = (input: string): { colspan: number; content: string } | null => {
+    if (!input.startsWith('\\multicolumn')) return null;
+    let i = '\\multicolumn'.length;
+    i = skipWs(input, i);
+    const g1 = readBraceGroup(input, i);
+    if (!g1) return null;
+    const n = Number(g1.value.trim());
+    if (!Number.isFinite(n) || n <= 0) return null;
+    i = skipWs(input, g1.next);
+    const _align = readBraceGroup(input, i);
+    if (!_align) return null;
+    i = skipWs(input, _align.next);
+    const g3 = readBraceGroup(input, i);
+    if (!g3) return null;
+    return { colspan: Math.trunc(n), content: g3.value };
+  };
+
+  const parseMultirow = (input: string): { rowspan: number; content: string } | null => {
+    if (!input.startsWith('\\multirow')) return null;
+    let i = '\\multirow'.length;
+    i = skipWs(input, i);
+    const opt = readBracketGroup(input, i);
+    if (opt) i = skipWs(input, opt.next);
+    const g1 = readBraceGroup(input, i);
+    if (!g1) return null;
+    const n = Math.round(Number(g1.value.trim()));
+    if (!Number.isFinite(n) || n === 0) return null;
+    i = skipWs(input, g1.next);
+    const opt2 = readBracketGroup(input, i);
+    if (opt2) i = skipWs(input, opt2.next);
+
+    // width arg: either '*' or {...}
+    if (input[i] === '*') {
+      i += 1;
+      i = skipWs(input, i);
+    } else {
+      const w = readBraceGroup(input, i);
+      if (w) i = skipWs(input, w.next);
+    }
+
+    const g2 = readBraceGroup(input, i);
+    if (!g2) return null;
+    return { rowspan: Math.abs(n), content: g2.value };
+  };
+
+  const mc = parseMulticolumn(value.trim());
+  if (mc) {
+    colspan = mc.colspan;
+    value = mc.content;
+    // If inner content is also a multicolumn, unwrap once (Python keeps outer alignment, we ignore align anyway).
+    const inner = parseMulticolumn(value.trim());
+    if (inner) value = inner.content;
   }
 
-  const multiRow = value.match(/^\\multirow\{(\d+)\}\{\*\}\{([\s\S]*)\}$/u);
-  if (multiRow) {
-    rowspan = Number(multiRow[1]);
-    value = multiRow[2];
+  const mr = parseMultirow(value.trim());
+  if (mr) {
+    rowspan = mr.rowspan;
+    value = mr.content;
   }
 
   // Unwrap wrappers that otherwise leak into prefixes.
@@ -276,13 +321,105 @@ function parseCell(raw: string): Cell {
   return { value: finalValue, style, rowspan, colspan, richSegments };
 }
 
-function extractTabularAll(tex: string): string[] {
-  const re = /\\begin\{tabular\}\{[^}]*\}([\s\S]*?)\\end\{tabular\}/gu;
-  const out: string[] = [];
+const TABULAR_BEGIN = '\\begin{tabular}';
+const TABULAR_END = '\\end{tabular}';
+
+function skipWs(input: string, i: number): number {
+  while (i < input.length && /\s/u.test(input[i])) i += 1;
+  return i;
+}
+
+function readTabularHeader(input: string, beginIdx: number): { bodyStart: number } | null {
+  let i = beginIdx + TABULAR_BEGIN.length;
+  i = skipWs(input, i);
+  const opt = readBracketGroup(input, i);
+  if (opt) {
+    i = skipWs(input, opt.next);
+  }
+  const spec = readBraceGroup(input, i);
+  if (!spec) return null;
+  return { bodyStart: spec.next };
+}
+
+function findMatchingTabularEnd(input: string, bodyStart: number): number | null {
+  let depth = 1;
+  let i = bodyStart;
   for (;;) {
-    const m = re.exec(tex);
-    if (!m) break;
-    out.push(m[1]);
+    const nb = input.indexOf(TABULAR_BEGIN, i);
+    const ne = input.indexOf(TABULAR_END, i);
+    if (ne < 0) return null;
+    if (nb >= 0 && nb < ne) {
+      depth += 1;
+      i = nb + TABULAR_BEGIN.length;
+      continue;
+    }
+    depth -= 1;
+    if (depth === 0) return ne;
+    i = ne + TABULAR_END.length;
+  }
+}
+
+function replaceTabularEnvs(input: string, replacer: (body: string) => string): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const begin = input.indexOf(TABULAR_BEGIN, i);
+    if (begin < 0) {
+      out += input.slice(i);
+      break;
+    }
+    out += input.slice(i, begin);
+    const hdr = readTabularHeader(input, begin);
+    if (!hdr) {
+      // If malformed, keep scanning after the marker to avoid infinite loops.
+      out += TABULAR_BEGIN;
+      i = begin + TABULAR_BEGIN.length;
+      continue;
+    }
+    const endIdx = findMatchingTabularEnd(input, hdr.bodyStart);
+    if (endIdx == null) {
+      out += input.slice(begin);
+      break;
+    }
+    const body = input.slice(hdr.bodyStart, endIdx);
+    out += replacer(body);
+    i = endIdx + TABULAR_END.length;
+  }
+  return out;
+}
+
+function stripLatexCommentsPreservingEscapes(input: string): string {
+  // Remove `% ...` comments, but keep escaped percent like `\%` (and malformed `\\%` artifacts).
+  const lines = input.split(/\r?\n/u);
+  const out: string[] = [];
+  for (const line of lines) {
+    let cut = line.length;
+    for (let i = 0; i < line.length; i += 1) {
+      if (line[i] !== '%') continue;
+      if (i > 0 && line[i - 1] === '\\') continue;
+      cut = i;
+      break;
+    }
+    out.push(line.slice(0, cut));
+  }
+  return out.join('\n');
+}
+
+function extractTabularAll(tex: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  for (;;) {
+    const begin = tex.indexOf(TABULAR_BEGIN, i);
+    if (begin < 0) break;
+    const hdr = readTabularHeader(tex, begin);
+    if (!hdr) {
+      i = begin + TABULAR_BEGIN.length;
+      continue;
+    }
+    const endIdx = findMatchingTabularEnd(tex, hdr.bodyStart);
+    if (endIdx == null) break;
+    out.push(tex.slice(hdr.bodyStart, endIdx));
+    i = endIdx + TABULAR_END.length;
   }
   if (out.length === 0) throw new Error('No tabular environment found');
   return out;
@@ -300,36 +437,121 @@ function emptyCell(): Cell {
   return { value: '', style: {}, rowspan: 1, colspan: 1, richSegments: null };
 }
 
+function cellHasPayload(cell: Cell): boolean {
+  const v = cell.value;
+  if (typeof v === 'string') {
+    if (v.trim()) return true;
+  } else if (v !== '' && v != null) {
+    return true;
+  }
+  if (cell.richSegments && cell.richSegments.length > 0) return true;
+  if (cell.style.diagbox && cell.style.diagbox.length > 0) return true;
+  return false;
+}
+
+function splitByDoubleBackslashLikePython(input: string): string[] {
+  // Mirrors pubtab-python `_split_by_double_backslash`:
+  // split on `\\` outside `{...}`, tolerate malformed extra `}`, and collapse runs like `\\\\` into one.
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = '';
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (ch === '{') {
+      depth += 1;
+      cur += ch;
+      continue;
+    }
+    if (ch === '}') {
+      depth = Math.max(0, depth - 1);
+      cur += ch;
+      continue;
+    }
+    if (ch === '\\' && input[i + 1] === '\\' && depth === 0) {
+      parts.push(cur);
+      cur = '';
+      i += 1; // consume second slash
+      // Collapse consecutive `\\` pairs to avoid producing artificial empty rows.
+      while (i + 2 < input.length && input[i + 1] === '\\' && input[i + 2] === '\\') {
+        i += 2;
+      }
+      continue;
+    }
+    cur += ch;
+  }
+  parts.push(cur);
+  return parts;
+}
+
+function stripRowRuleCommandsLikePython(chunk: string): { cleaned: string; hasHlineBefore: boolean; originalEmpty: boolean } {
+  const original = chunk.trim();
+  const originalEmpty = original.length === 0;
+  const hasHlineBefore = /^\s*\\(?:hline|hdashline|thickhline|Xhline(?:\{[^}]*\}|[\d.]*)|addlinespace(?:\[[^\]]*\])?|toprule|midrule|bottomrule(?:\[[^\]]*\])?|specialrule\{[^}]*\}\{[^}]*\}\{[^}]*\}|cmidrule(?:\([^)]*\))?\{[^}]*\}|cline(?:\([^)]*\))?(?:\[[^\]]*\])?\{[^}]*\}|cdashline(?:\([^)]*\))?(?:\[[^\]]*\])?\{[^}]*\}|cdashlinelr\{[^}]*\})/u.test(original);
+  let s = original;
+  s = s.replace(/^\s*\\hline\s*/u, '');
+  s = s.replace(/\\(hdashline|thickhline)\s*/gu, '');
+  s = s.replace(/\\Xhline(?:\{[^}]*\}|[\d.]+\w*)\s*/gu, '');
+  s = s.replace(/\\addlinespace(?:\[[^\]]*\])?\s*/gu, '');
+  s = s.replace(/\\(toprule|bottomrule|midrule)(?:\[[^\]]*\])?\s*/gu, '');
+  s = s.replace(/\\specialrule\{[^}]*\}\{[^}]*\}\{[^}]*\}\s*/gu, '');
+  s = s.replace(/\\cmidrule(\([^)]*\))?\{[^}]*\}\s*/gu, '');
+  s = s.replace(/\\cline(\([^)]*\))?(?:\[[^\]]*\])?\{[^}]*\}\s*/gu, '');
+  s = s.replace(/\\cdashline(\([^)]*\))?(?:\[[^\]]*\])?\{[^}]*\}\s*/gu, '');
+  s = s.replace(/\\cdashlinelr\{[^}]*\}\s*/gu, '');
+  s = s.trim();
+  return { cleaned: s, hasHlineBefore, originalEmpty };
+}
+
 function parseTabularBody(bodyRaw: string): TableData {
-  const body = bodyRaw
-    .replace(/%.*$/gmu, '')
-    .replace(/\\toprule|\\midrule|\\bottomrule|\\hline/g, '')
+  const body = replaceTabularEnvs(
+    stripLatexCommentsPreservingEscapes(bodyRaw),
+    // Convert nested tabular blocks (used as line breaks) into plain content.
+    (inner) => inner.replace(/\\\\/g, '\n'),
+  )
+    .replace(/\\toprule(?:\[[^\]]+\])?|\\midrule|\\bottomrule(?:\[[^\]]+\])?|\\hline/gu, '')
     .trim();
 
-  const rawRows = splitUnescaped(body, '\\\\')
-    .map((x) => x.trim())
-    .filter((x) => x.length > 0);
-
-  const rows: Cell[][] = rawRows
-    .map((row) => {
-      // pubtab often inserts rule/color commands as standalone lines between rows;
-      // after splitting by `\\`, they can become prefixes of the next segment.
-      let r = row
-        .replace(/^\s*\\cline\{[^}]+\}\s*/u, '')
-        .replace(/^\s*\\cmidrule\{[^}]+\}\s*/u, '');
+  // Row split that matches pubtab-python: keep explicit empty/rule-only rows as "" so
+  // multirow headers can retain their required spacer line.
+  const rawChunks = splitByDoubleBackslashLikePython(body);
+  const rows: Array<Cell[] | { kind: 'spacer'; hasHlineBefore: boolean }> = [];
+  for (const chunk of rawChunks) {
+    const { cleaned, hasHlineBefore, originalEmpty } = stripRowRuleCommandsLikePython(chunk);
+    if (cleaned) {
       // Strip leading rowcolor so the first cell parses correctly.
-      r = r.replace(/^\s*\\rowcolor(?:\[[^\]]+\])?\{[^}]+\}\s*/u, '');
-      return r.trim();
-    })
-    .filter((row) => row.length > 0)
-    .map((row) => splitUnescaped(row, '&').map((c) => parseCell(c)));
+      const r = cleaned.replace(/^\s*\\rowcolor(?:\[[^\]]+\])?\{[^}]+\}\s*/u, '').trim();
+      // Some docx exports escape every separator as `\&`; if there are no real '&' but many '\&',
+      // treat them as separators (Python does this in `_parse_row`).
+      const sepRow = !/(^|[^\\])&/u.test(r) && (r.match(/\\&/gu) ?? []).length >= 2 ? r.replace(/\\&/g, '&') : r;
+      rows.push(splitUnescaped(sepRow, '&').map((c) => parseCell(c)));
+      continue;
+    }
+    if (originalEmpty || hasHlineBefore) rows.push({ kind: 'spacer', hasHlineBefore });
+  }
 
   // Expand multicolumn and insert placeholders for multirow so each row becomes a rectangular grid.
   const activeRowspans: number[] = [];
+  const activeRowspanPayload: boolean[] = [];
   const expanded: Cell[][] = [];
   let maxCols = 0;
 
   for (const rawCells of rows) {
+    if (!Array.isArray(rawCells)) {
+      // Keep spacer rows only when required by an active rowspan whose master had payload.
+      const keep = activeRowspans.some((n, i) => (n ?? 0) > 0 && Boolean(activeRowspanPayload[i]));
+      if (!keep) continue;
+      const expectedCols = Math.max(maxCols, 1);
+      const outRow: Cell[] = [];
+      for (let colIdx = 0; colIdx < expectedCols; colIdx += 1) {
+        outRow.push(emptyCell());
+        if ((activeRowspans[colIdx] ?? 0) > 0) {
+          activeRowspans[colIdx] = (activeRowspans[colIdx] ?? 0) - 1;
+          if ((activeRowspans[colIdx] ?? 0) <= 0) activeRowspanPayload[colIdx] = false;
+        }
+      }
+      expanded.push(outRow);
+      continue;
+    }
     const rawWidth = rawCells.reduce((sum, c) => sum + Math.max(1, c.colspan || 1), 0);
     const expectedCols = Math.max(maxCols, rawWidth, 1);
 
@@ -354,6 +576,7 @@ function parseTabularBody(bodyRaw: string): TableData {
 
         outRow.push(emptyCell());
         activeRowspans[colIdx] = (activeRowspans[colIdx] ?? 0) - 1;
+        if ((activeRowspans[colIdx] ?? 0) <= 0) activeRowspanPayload[colIdx] = false;
         colIdx += 1;
         continue;
       }
@@ -366,9 +589,11 @@ function parseTabularBody(bodyRaw: string): TableData {
 
       outRow.push(cell);
       if (spanRows > 0) {
+        const payload = cellHasPayload(cell);
         for (let j = 0; j < spanCols; j += 1) {
           const idx = colIdx + j;
           activeRowspans[idx] = Math.max(activeRowspans[idx] ?? 0, spanRows);
+          if (payload) activeRowspanPayload[idx] = true;
         }
       }
       for (let j = 1; j < spanCols; j += 1) {
@@ -382,6 +607,7 @@ function parseTabularBody(bodyRaw: string): TableData {
       if ((activeRowspans[colIdx] ?? 0) > 0) {
         outRow.push(emptyCell());
         activeRowspans[colIdx] = (activeRowspans[colIdx] ?? 0) - 1;
+        if ((activeRowspans[colIdx] ?? 0) <= 0) activeRowspanPayload[colIdx] = false;
       } else {
         outRow.push(emptyCell());
       }
@@ -393,6 +619,7 @@ function parseTabularBody(bodyRaw: string): TableData {
       while ((activeRowspans[colIdx] ?? 0) > 0) {
         outRow.push(emptyCell());
         activeRowspans[colIdx] = (activeRowspans[colIdx] ?? 0) - 1;
+        if ((activeRowspans[colIdx] ?? 0) <= 0) activeRowspanPayload[colIdx] = false;
         colIdx += 1;
       }
 
@@ -403,9 +630,11 @@ function parseTabularBody(bodyRaw: string): TableData {
 
       outRow.push(cell);
       if (spanRows > 0) {
+        const payload = cellHasPayload(cell);
         for (let j = 0; j < spanCols; j += 1) {
           const idx = colIdx + j;
           activeRowspans[idx] = Math.max(activeRowspans[idx] ?? 0, spanRows);
+          if (payload) activeRowspanPayload[idx] = true;
         }
       }
       for (let j = 1; j < spanCols; j += 1) {
