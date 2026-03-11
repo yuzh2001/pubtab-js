@@ -1,0 +1,50 @@
+% Theme package hints for this table (add in your preamble):
+% \usepackage{booktabs}
+% \usepackage{multirow}
+% \usepackage[table]{xcolor}
+% \usepackage{diagbox}
+% \usepackage{makecell}
+% \usepackage{adjustbox}
+% \usepackage{amssymb}
+% \usepackage{pifont}
+\setlength{\heavyrulewidth}{1.0pt}
+\setlength{\lightrulewidth}{0.5pt}
+\setlength{\arrayrulewidth}{0.5pt}
+\setlength{\aboverulesep}{0pt}
+\setlength{\belowrulesep}{0pt}
+\begin{table}[htbp]
+\centering
+\begin{tabular}{cccccccc}
+\toprule
+\multirow{2}{*}{\textbf{Backbones}} & \multirow{2}{*}{\textbf{Methods}} & \multicolumn{4}{c}{\textbf{Rubric Grading}} & \multirow{2}{*}{\textbf{ROUGE-1}} & \multirow{2}{*}{\textbf{ROUGE-1}} \\
+\cline{3-6}
+ &  & \textbf{Relevance} & \textbf{Breadth} & \textbf{Interest Level} & \textbf{Organization} &  &  \\
+\midrule
+\rowcolor[RGB]{135,206,235}\multicolumn{8}{>{\columncolor[RGB]{135,206,235}}c}{\textbf{Conversational Models}} \\
+\midrule
+\multirow{5}{*}{\textbf{GPT-4o}} & oRAG & 3.91 & 4.08 & 3.96 & 3.63 & 00.00 & 00.00 \\
+ & STORM & 4.10 & 4.19 & 4.21 & 3.89 & 00.00 & 00.00 \\
+ & Co-STORM & 4.26 & 4.22 & 4.30 & 4.07 & 00.00 & 00.00 \\
+ & OmniThink & 4.31 & 4.38 & 4.33 & 4.15 & 00.00 & 00.00 \\
+ & \cellcolor[RGB]{230,230,230}{Our} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} \\
+\multirow{5}{*}{\textbf{Qwen-Plus}} & oRAG & 3.97 & 4.10 & 4.12 & 3.72 & 00.00 & 00.00 \\
+ & STORM & 4.16 & 4.23 & 4.33 & 4.01 & 00.00 & 00.00 \\
+ & Co-STORM & 4.34 & 4.28 & 4.42 & 4.10 & 00.00 & 00.00 \\
+ & OmniThink & 4.37 & 4.43 & 4.45 & 4.19 & 00.00 & 00.00 \\
+ & \cellcolor[RGB]{230,230,230}{Our} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} \\
+\midrule
+\rowcolor[RGB]{255,217,178}\multicolumn{8}{>{\columncolor[RGB]{255,217,178}}c}{\textbf{Reasoning Models}} \\
+\midrule
+\multirow{5}{*}{\textbf{O1-preview}} & oRAG & 4.02 & 4.10 & 4.18 & 3.81 & 00.00 & 00.00 \\
+ & STORM & 4.18 & 4.29 & 4.35 & 4.07 & 00.00 & 00.00 \\
+ & Co-STORM & 4.37 & 4.26 & 4.46 & 4.25 & 00.00 & 00.00 \\
+ & OmniThink & 4.40 & 4.50 & 4.51 & 4.23 & 00.00 & 00.00 \\
+ & \cellcolor[RGB]{230,230,230}{our} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} \\
+\multirow{6}{*}{\textbf{DeepSeek-R1}} & oRAG & 4.03 & 4.08 & 4.17 & 3.86 & 00.00 & 00.00 \\
+ & STORM & 4.19 & 4.27 & 4.30 & 4.08 & 00.00 & 00.00 \\
+ & Co-STORM & 4.34 & 4.29 & 4.37 & 4.21 & 00.00 & 00.00 \\
+ & OmniThink & 4.37 & 4.42 & 4.48 & 4.18 & 00.00 & 00.00 \\
+ & \cellcolor[RGB]{230,230,230}{Our} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} & \cellcolor[RGB]{230,230,230}{\textbf{0.00}} \\
+\bottomrule
+\end{tabular}
+\end{table}

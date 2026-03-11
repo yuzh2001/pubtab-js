@@ -3,3 +3,5 @@ dist/
 .vitest/
 *.log
 .DS_Store
+
+.pubtab-python
