@@ -1,0 +1,8 @@
+[general]
+trunk = "main"
+copy_files = ['./.pubtab-python']
+
+[hooks]
+post_create = ['pnpm i']
+pre_merge = ['pnpm test']
+post_merge = []
