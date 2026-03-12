@@ -38,6 +38,31 @@ export function latexRgbToHex(rgb: string): string | null {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+export function formatNumber(value: unknown, fmt: string, stripLeadingZero: boolean = true): string {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return String(value);
+
+  try {
+    let out: string;
+    if (/^\.\d+f$/u.test(fmt)) {
+      const digits = Number(fmt.slice(1, -1));
+      out = num.toFixed(digits);
+    } else if (/^\.\d+%$/u.test(fmt)) {
+      const digits = Number(fmt.slice(1, -1));
+      out = `${(num * 100).toFixed(digits)}%`;
+    } else {
+      out = String(value);
+    }
+    if (stripLeadingZero && num > -1 && num < 1) {
+      if (out.startsWith('0.')) out = out.replace(/^0\./u, '.');
+      if (out.startsWith('-0.')) out = out.replace(/^-0\./u, '-.');
+    }
+    return out;
+  } catch {
+    return String(value);
+  }
+}
+
 export function stripLatexWrappers(raw: string): string {
   // Common wrappers used by pubtab outputs.
   // Keep this conservative: we only unwrap when the whole cell is a wrapper.

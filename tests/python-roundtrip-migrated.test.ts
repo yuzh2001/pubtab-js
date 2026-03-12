@@ -747,6 +747,42 @@ L1 &  & R1 \\
       expect(tex).toContain('1.0pt');
     });
 
+    it('test_render_applies_spacing_resizebox_and_font_size', () => {
+      const table = {
+        cells: [
+          [
+            { value: 'a', style: {}, rowspan: 1, colspan: 1 },
+            { value: 'b', style: {}, rowspan: 1, colspan: 1 },
+          ],
+        ],
+        numRows: 1,
+        numCols: 2,
+        headerRows: 0,
+        groupSeparators: {},
+      };
+      const tex = render(table, {
+        spacing: {
+          tabcolsep: '2.4pt',
+          arraystretch: '1.0',
+          heavyrulewidth: '1.2pt',
+          lightrulewidth: '0.6pt',
+          arrayrulewidth: '0.3pt',
+        },
+        resizebox: '\\linewidth',
+        fontSize: 'small',
+      });
+      expect(tex).toContain('\\setlength{\\tabcolsep}{2.4pt}');
+      expect(tex).toContain('\\renewcommand{\\arraystretch}{1.0}');
+      expect(tex).toContain('\\setlength{\\heavyrulewidth}{1.2pt}');
+      expect(tex).toContain('\\setlength{\\lightrulewidth}{0.6pt}');
+      expect(tex).toContain('\\setlength{\\arrayrulewidth}{0.3pt}');
+      expect(tex).toContain('\\resizebox{\\linewidth}{!}{');
+      expect(tex).toContain('\\small');
+      expect(tex).not.toContain('% resizebox hint:');
+      expect(tex.indexOf('\\resizebox{\\linewidth}{!}{')).toBeLessThan(tex.indexOf('\\begin{tabular}{cc}'));
+      expect(tex.indexOf('\\small')).toBeLessThan(tex.indexOf('\\begin{tabular}{cc}'));
+    });
+
     it('test_render_section_row_midrules_when_section_not_in_first_column', () => {
       const table = {
         cells: [
@@ -761,6 +797,159 @@ L1 &  & R1 \\
       };
       const tex = render(table);
       expect((tex.match(/\\midrule/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('test_render_auto_inserts_header_cline_for_multirow_headers', () => {
+      const table = {
+        cells: [
+          [
+            { value: 'Dataset', style: {}, rowspan: 2, colspan: 1 },
+            { value: 'Metrics', style: {}, rowspan: 1, colspan: 2 },
+            { value: '', style: {}, rowspan: 1, colspan: 1 },
+          ],
+          [
+            { value: '', style: {}, rowspan: 1, colspan: 1 },
+            { value: 'Acc', style: {}, rowspan: 1, colspan: 1 },
+            { value: 'F1', style: {}, rowspan: 1, colspan: 1 },
+          ],
+          [
+            { value: 'S1', style: {}, rowspan: 1, colspan: 1 },
+            { value: '0.91', style: {}, rowspan: 1, colspan: 1 },
+            { value: '0.88', style: {}, rowspan: 1, colspan: 1 },
+          ],
+        ],
+        numRows: 3,
+        numCols: 3,
+        headerRows: 2,
+        groupSeparators: {},
+      };
+      const tex = render(table);
+      expect(tex).toContain('\\cline{2-3}');
+    });
+
+    it('test_render_header_sep_string_overrides_default_midrule', () => {
+      const table = {
+        cells: [
+          [{ value: 'A', style: {}, rowspan: 1, colspan: 1 }, { value: 'B', style: {}, rowspan: 1, colspan: 1 }],
+          [{ value: 'x', style: {}, rowspan: 1, colspan: 1 }, { value: 'y', style: {}, rowspan: 1, colspan: 1 }],
+        ],
+        numRows: 2,
+        numCols: 2,
+        headerRows: 1,
+        groupSeparators: {},
+      };
+      const tex = render(table, { headerSep: '\\specialrule{1pt}{0pt}{0pt}' });
+      expect(tex).toContain('\\specialrule{1pt}{0pt}{0pt}');
+      expect(tex).not.toContain('\\midrule');
+    });
+
+    it('test_render_header_sep_array_interleaves_header_rows', () => {
+      const table = {
+        cells: [
+          [{ value: 'Dataset', style: {}, rowspan: 2, colspan: 1 }, { value: 'Metrics', style: {}, rowspan: 1, colspan: 2 }, { value: '', style: {}, rowspan: 1, colspan: 1 }],
+          [{ value: '', style: {}, rowspan: 1, colspan: 1 }, { value: 'Acc', style: {}, rowspan: 1, colspan: 1 }, { value: 'F1', style: {}, rowspan: 1, colspan: 1 }],
+          [{ value: 'S1', style: {}, rowspan: 1, colspan: 1 }, { value: '0.91', style: {}, rowspan: 1, colspan: 1 }, { value: '0.88', style: {}, rowspan: 1, colspan: 1 }],
+        ],
+        numRows: 3,
+        numCols: 3,
+        headerRows: 2,
+        groupSeparators: {},
+      };
+      const tex = render(table, {
+        headerSep: ['\\cline{2-3}', '\\specialrule{1pt}{0pt}{0pt}'],
+      });
+      expect(tex).toContain('\\cline{2-3}');
+      expect(tex).toContain('\\specialrule{1pt}{0pt}{0pt}');
+      expect(tex.indexOf('\\cline{2-3}')).toBeLessThan(tex.indexOf('\\specialrule{1pt}{0pt}{0pt}'));
+    });
+
+    it('test_render_builds_col_spec_from_first_row_alignment', () => {
+      const table = {
+        cells: [
+          [{ value: 'L', style: { alignment: 'left' }, rowspan: 1, colspan: 1 }, { value: 'R', style: { alignment: 'right' }, rowspan: 1, colspan: 1 }],
+          [{ value: 'x', style: {}, rowspan: 1, colspan: 1 }, { value: 'y', style: {}, rowspan: 1, colspan: 1 }],
+        ],
+        numRows: 2,
+        numCols: 2,
+        headerRows: 1,
+        groupSeparators: {},
+      };
+      const tex = render(table);
+      expect(tex).toContain('\\begin{tabular}{lr}');
+    });
+
+    it('test_render_wraps_single_cells_for_p_columns', () => {
+      const table = {
+        cells: [
+          [{ value: 'Long text', style: {}, rowspan: 1, colspan: 1 }, { value: 'B', style: {}, rowspan: 1, colspan: 1 }],
+        ],
+        numRows: 1,
+        numCols: 2,
+        headerRows: 0,
+        groupSeparators: {},
+      };
+      const tex = render(table, { colSpec: 'p{2cm}c' });
+      expect(tex).toContain('\\multicolumn{1}{c}{Long text}');
+      expect(tex).toContain('\\multicolumn{1}{c}{B}');
+    });
+
+    it('test_render_uses_rowcolor_for_uniform_background_rows', () => {
+      const table = {
+        cells: [
+          [{ value: 'A', style: { bgColor: '#EEEEEE' }, rowspan: 1, colspan: 1 }, { value: 'B', style: { bgColor: '#EEEEEE' }, rowspan: 1, colspan: 1 }],
+        ],
+        numRows: 1,
+        numCols: 2,
+        headerRows: 0,
+        groupSeparators: {},
+      };
+      const tex = render(table);
+      expect(tex).toContain('\\rowcolor[RGB]{238,238,238}');
+    });
+
+    it('test_render_uses_negative_multirow_for_bg_colored_rowspan', () => {
+      const table = {
+        cells: [
+          [{ value: 'Group', style: { bgColor: '#EEEEEE' }, rowspan: 2, colspan: 1 }, { value: 'A', style: {}, rowspan: 1, colspan: 1 }],
+          [{ value: '', style: {}, rowspan: 1, colspan: 1 }, { value: 'B', style: {}, rowspan: 1, colspan: 1 }],
+        ],
+        numRows: 2,
+        numCols: 2,
+        headerRows: 0,
+        groupSeparators: {},
+      };
+      const tex = render(table);
+      expect(tex).toContain('\\multirow{-2}{*}{Group}');
+      expect(tex).toContain('\\cellcolor[RGB]{238,238,238}');
+    });
+
+    it('test_render_formats_numbers_and_supports_strip_leading_zero', () => {
+      const table = {
+        cells: [[
+          { value: 0.451, style: { fmt: '.3f' }, rowspan: 1, colspan: 1 },
+          { value: 0.451, style: { fmt: '.3f', stripLeadingZero: false }, rowspan: 1, colspan: 1 },
+        ]],
+        numRows: 1,
+        numCols: 2,
+        headerRows: 0,
+        groupSeparators: {},
+      };
+      const tex = render(table);
+      expect(tex).toContain('.451 & 0.451');
+    });
+
+    it('test_render_supports_upright_scripts', () => {
+      const table = {
+        cells: [[
+          { value: '$F_{abc}$', style: { rawLatex: true }, rowspan: 1, colspan: 1 },
+        ]],
+        numRows: 1,
+        numCols: 1,
+        headerRows: 0,
+        groupSeparators: {},
+      };
+      const tex = render(table, { uprightScripts: true });
+      expect(tex).toContain('_{\\mathrm{abc}}');
     });
 
     it('test_render_section_row_uses_partial_rule_when_first_col_is_active_multirow', () => {

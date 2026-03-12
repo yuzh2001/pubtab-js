@@ -1,5 +1,5 @@
-import type { Cell, RenderOptions, RichSegment, TableData } from './models.js';
-import { hexToLatexColor, latexEscape } from './utils.js';
+import type { Cell, RenderOptions, RichSegment, SpacingConfig, TableData } from './models.js';
+import { formatNumber, hexToLatexColor, latexEscape } from './utils.js';
 import { getTheme } from './themes.js';
 
 const SUBSCRIPT_CHAR_MAP: Record<string, string> = {
@@ -30,8 +30,13 @@ function normalizeUnicodeSubscript(text: string): string {
 
 function cellToLatex(cell: Cell): string {
   const style = cell.style ?? {};
-  let text = style.rawLatex ? String(cell.value ?? '') : latexEscape(cell.value ?? '');
-  if (!style.rawLatex) {
+  let text: string;
+  if (style.rawLatex) {
+    text = String(cell.value ?? '');
+  } else if (style.fmt && typeof cell.value === 'number') {
+    text = formatNumber(cell.value, style.fmt, style.stripLeadingZero !== false);
+  } else {
+    text = latexEscape(cell.value ?? '');
     text = normalizeUnicodeSubscript(text);
   }
 
@@ -115,8 +120,12 @@ function buildPackageHints(table: TableData, opts: RenderOptions): string {
       lines.push(`% \\usepackage{${pkg}}`);
     }
   }
-  lines.push('');
-  return lines.join('\n');
+  let result = lines.join('\n');
+  if (opts.uprightScripts) {
+    result = result.replace(/([_^])\{([^}\\]+)\}/gu, '$1{\\mathrm{$2}}');
+  }
+  result += '\n';
+  return result;
 }
 
 function cellHasPayload(cell: Cell): boolean {
@@ -188,37 +197,230 @@ function normalizeGroupSeparators(
   return gs || {};
 }
 
-function renderCells(row: Cell[]): string {
+function buildColSpec(table: TableData): string {
+  const specs: string[] = [];
+  for (let c = 0; c < table.numCols; c += 1) {
+    if (table.cells.length > 0 && c < table.cells[0].length) {
+      const alignment = table.cells[0][c]?.style.alignment?.[0] ?? 'c';
+      specs.push(alignment);
+    } else {
+      specs.push('c');
+    }
+  }
+  return specs.join('');
+}
+
+function rowUniformBg(cells: Cell[]): string | null {
+  let skip = 0;
+  let color: string | null = null;
+  for (const cell of cells) {
+    if (skip > 0) {
+      skip -= 1;
+      continue;
+    }
+    if (cell.colspan > 1) skip = cell.colspan - 1;
+    if (!cell.style.bgColor) return null;
+    if (color == null) {
+      color = cell.style.bgColor;
+    } else if (color !== cell.style.bgColor) {
+      return null;
+    }
+  }
+  return color;
+}
+
+function autoHeaderRule(tableCells: Cell[][], rowIdx: number, numCols: number): string | null {
+  const skipCols = new Set<number>();
+  for (let r = 0; r <= rowIdx; r += 1) {
+    let col = 1;
+    for (const cell of tableCells[r] ?? []) {
+      if (cell.rowspan > 1 && (r + cell.rowspan) > (rowIdx + 1)) {
+        const span = Math.max(cell.colspan, 1);
+        for (let c = col; c < col + span; c += 1) skipCols.add(c);
+      }
+      col += Math.max(cell.colspan, 1);
+    }
+  }
+
+  if (skipCols.size >= numCols) return null;
+
+  const rules: string[] = [];
+  let start: number | null = null;
+  for (let c = 1; c <= numCols; c += 1) {
+    if (!skipCols.has(c)) {
+      if (start == null) start = c;
+      continue;
+    }
+    if (start != null) {
+      rules.push(`\\cline{${start}-${c - 1}}`);
+      start = null;
+    }
+  }
+  if (start != null) rules.push(`\\cline{${start}-${numCols}}`);
+  return rules.length > 0 ? rules.join(' ') : null;
+}
+
+type VmergeState = {
+  bg: Map<string, string>;
+  neg: Map<string, { rowspan: number; styled: string }>;
+  suppress: Set<string>;
+};
+
+function buildVmergeState(table: TableData): VmergeState {
+  const bg = new Map<string, string>();
+  const neg = new Map<string, { rowspan: number; styled: string }>();
+  const suppress = new Set<string>();
+
+  for (let ri = 0; ri < table.cells.length; ri += 1) {
+    const row = table.cells[ri];
+    for (let ci = 0; ci < row.length; ci += 1) {
+      const cell = row[ci];
+      if (cell.rowspan <= 1 || !cell.style.bgColor) continue;
+
+      suppress.add(`${ri},${ci}`);
+      for (let dr = 1; dr < cell.rowspan; dr += 1) {
+        bg.set(`${ri + dr},${ci}`, cell.style.bgColor);
+      }
+      neg.set(`${ri + cell.rowspan - 1},${ci}`, {
+        rowspan: cell.rowspan,
+        styled: cellToLatex({
+          ...cell,
+          rowspan: 1,
+          style: { ...cell.style, bgColor: undefined },
+        }),
+      });
+    }
+  }
+
+  return { bg, neg, suppress };
+}
+
+function renderCells(
+  row: Cell[],
+  hasPCols: boolean = false,
+  context?: { rowIndex: number; vmerge: VmergeState },
+): string {
   const rendered: string[] = [];
-  for (let c = 0; c < row.length; ) {
-    const cell = row[c];
-    rendered.push(cellToLatex(cell));
-    c += Math.max(1, cell.colspan || 1);
+  let skip = 0;
+  let ci = 0;
+  const rowBg = rowUniformBg(row);
+
+  for (const cell of row) {
+    if (skip > 0) {
+      skip -= 1;
+      ci += 1;
+      continue;
+    }
+    if (cell.colspan > 1) skip = cell.colspan - 1;
+
+    let text: string;
+    if (context && context.vmerge.suppress.has(`${context.rowIndex},${ci}`)) {
+      text = `\\cellcolor[RGB]{${hexToLatexColor(cell.style.bgColor ?? '')}}`;
+    } else if (context) {
+      const negative = context.vmerge.neg.get(`${context.rowIndex},${ci}`);
+      const bg = context.vmerge.bg.get(`${context.rowIndex},${ci}`);
+      if (negative) {
+        text = `\\cellcolor[RGB]{${hexToLatexColor(bg ?? '')}}\\multirow{-${negative.rowspan}}{*}{${negative.styled}}`;
+      } else if ((cell.value === '' || cell.value == null) && bg) {
+        text = `\\cellcolor[RGB]{${hexToLatexColor(bg ?? '')}}`;
+      } else {
+        text = cellToLatex(cell);
+      }
+    } else {
+      text = cellToLatex(cell);
+    }
+
+    if (hasPCols && cell.colspan === 1 && text && !text.startsWith('\\multicolumn')) {
+      text = `\\multicolumn{1}{c}{${text}}`;
+    }
+    rendered.push(text);
+    ci += 1;
+  }
+
+  if (rowBg && rendered.length > 0) {
+    rendered[0] = `\\rowcolor[RGB]{${hexToLatexColor(rowBg)}}${rendered[0]}`;
   }
   return `${rendered.join(' & ')} \\\\`;
 }
 
+function mergeSpacing(themeSpacing: SpacingConfig, userSpacing: SpacingConfig | undefined): Required<SpacingConfig> {
+  return {
+    tabcolsep: userSpacing?.tabcolsep ?? themeSpacing.tabcolsep ?? null,
+    arraystretch: userSpacing?.arraystretch ?? themeSpacing.arraystretch ?? null,
+    heavyrulewidth: userSpacing?.heavyrulewidth ?? themeSpacing.heavyrulewidth ?? '1.0pt',
+    lightrulewidth: userSpacing?.lightrulewidth ?? themeSpacing.lightrulewidth ?? '0.5pt',
+    arrayrulewidth: userSpacing?.arrayrulewidth ?? themeSpacing.arrayrulewidth ?? '0.5pt',
+    aboverulesep: userSpacing?.aboverulesep ?? themeSpacing.aboverulesep ?? '0pt',
+    belowrulesep: userSpacing?.belowrulesep ?? themeSpacing.belowrulesep ?? '0pt',
+  };
+}
+
+function pushSpacing(lines: string[], spacing: Required<SpacingConfig>): void {
+  if (spacing.tabcolsep) lines.push(`\\setlength{\\tabcolsep}{${spacing.tabcolsep}}`);
+  if (spacing.arraystretch) lines.push(`\\renewcommand{\\arraystretch}{${spacing.arraystretch}}`);
+  if (spacing.heavyrulewidth) lines.push(`\\setlength{\\heavyrulewidth}{${spacing.heavyrulewidth}}`);
+  if (spacing.lightrulewidth) lines.push(`\\setlength{\\lightrulewidth}{${spacing.lightrulewidth}}`);
+  if (spacing.arrayrulewidth) lines.push(`\\setlength{\\arrayrulewidth}{${spacing.arrayrulewidth}}`);
+  if (spacing.aboverulesep) lines.push(`\\setlength{\\aboverulesep}{${spacing.aboverulesep}}`);
+  if (spacing.belowrulesep) lines.push(`\\setlength{\\belowrulesep}{${spacing.belowrulesep}}`);
+}
+
 export function render(table: TableData, opts: RenderOptions = {}): string {
   const theme = getTheme(opts.theme);
-  const colSpec = opts.colSpec ?? 'c'.repeat(Math.max(1, table.numCols));
+  const spacing = mergeSpacing(theme.spacing, opts.spacing);
+  const colSpec = opts.colSpec ?? buildColSpec(table);
+  const hasPCols = colSpec.includes('p{');
+  const vmerge = buildVmergeState(table);
   const lines: string[] = [];
   lines.push(buildPackageHints(table, opts));
 
   const env = opts.spanColumns ? 'table*' : 'table';
+  pushSpacing(lines, spacing);
   lines.push(`\\begin{${env}}[${opts.position ?? 'htbp'}]`);
   lines.push('\\centering');
-  lines.push('\\setlength{\\heavyrulewidth}{1.0pt}');
   const captionPosition = theme.captionPosition ?? 'top';
   if (opts.caption && captionPosition === 'top') {
     lines.push(`\\caption{${latexEscape(opts.caption)}}`);
   }
   if (opts.label) lines.push(`\\label{${latexEscape(opts.label)}}`);
+  if (opts.resizebox) {
+    lines.push(`\\resizebox{${opts.resizebox}}{!}{`);
+  }
+  const fontSize = opts.fontSize ?? theme.fontSize;
+  if (fontSize) {
+    lines.push(`\\${fontSize}`);
+  }
   lines.push(`\\begin{tabular}{${colSpec}}`);
   lines.push('\\toprule');
 
   const bodyCells = table.cells.slice(table.headerRows);
   const groupSeparators = normalizeGroupSeparators(table.groupSeparators);
   const bodyRowsWithSep: string[] = [];
+  const rawHeaderRows = table.cells.slice(0, table.headerRows).map((row, rowIndex) => renderCells(row, hasPCols, { rowIndex, vmerge }));
+  let headerRowsWithSep = rawHeaderRows;
+  let finalHeaderSep: string | undefined = typeof opts.headerSep === 'string' ? opts.headerSep : undefined;
+
+  if (Array.isArray(opts.headerSep) && opts.headerSep.length >= rawHeaderRows.length) {
+    headerRowsWithSep = [];
+    for (let i = 0; i < rawHeaderRows.length; i += 1) {
+      headerRowsWithSep.push(rawHeaderRows[i]);
+      if (i < rawHeaderRows.length - 1) {
+        headerRowsWithSep.push(opts.headerSep[i]);
+      }
+    }
+    finalHeaderSep = opts.headerSep[opts.headerSep.length - 1];
+  } else if (opts.headerSep == null && table.headerRows > 1 && opts.headerCmidrule !== false) {
+    headerRowsWithSep = [];
+    for (let i = 0; i < rawHeaderRows.length; i += 1) {
+      headerRowsWithSep.push(rawHeaderRows[i]);
+      if (i < rawHeaderRows.length - 1) {
+        const rule = autoHeaderRule(table.cells, i, table.numCols);
+        if (rule) headerRowsWithSep.push(rule);
+      }
+    }
+  } else if (Array.isArray(opts.headerSep)) {
+    finalHeaderSep = opts.headerSep.length > 0 ? opts.headerSep[opts.headerSep.length - 1] : undefined;
+  }
 
   for (let i = 0; i < bodyCells.length; i += 1) {
     const row = bodyCells[i];
@@ -229,7 +431,7 @@ export function render(table: TableData, opts: RenderOptions = {}): string {
       bodyRowsWithSep.push(sep);
     }
 
-    bodyRowsWithSep.push(renderCells(row));
+    bodyRowsWithSep.push(renderCells(row, hasPCols, { rowIndex: table.headerRows + i, vmerge }));
 
     const absoluteIdx = table.headerRows + i;
     const hasCustomSeparator = Object.prototype.hasOwnProperty.call(groupSeparators, absoluteIdx);
@@ -249,28 +451,25 @@ export function render(table: TableData, opts: RenderOptions = {}): string {
     }
   }
 
-  for (let r = 0; r < table.cells.length; r += 1) {
-    const row = table.cells[r];
-    if (r < table.headerRows) {
-      lines.push(renderCells(row));
-      if (r === table.headerRows - 1) lines.push('\\midrule');
-      continue;
-    }
-    if (r === table.headerRows) {
-      lines.push(...bodyRowsWithSep);
-    }
-    break;
+  if (table.headerRows > 0) {
+    lines.push(...headerRowsWithSep);
+    lines.push(finalHeaderSep ?? '\\midrule');
   }
+  lines.push(...bodyRowsWithSep);
 
   lines.push('\\bottomrule');
   lines.push('\\end{tabular}');
   if (opts.resizebox) {
-    lines.push(`% resizebox hint: \\resizebox{${opts.resizebox}}{!}{...}`);
+    lines.push('}');
   }
   if (opts.caption && captionPosition === 'bottom') {
     lines.push(`\\caption{${latexEscape(opts.caption)}}`);
   }
   lines.push(`\\end{${env}}`);
   lines.push('');
-  return lines.join('\n');
+  let result = lines.join('\n');
+  if (opts.uprightScripts) {
+    result = result.replace(/([_^])\{([^}\\]+)\}/gu, (_m, op, content) => `${op}{\\mathrm{${content}}}`);
+  }
+  return result;
 }

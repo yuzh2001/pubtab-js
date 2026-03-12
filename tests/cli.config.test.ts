@@ -5,6 +5,7 @@ import os from 'node:os';
 import ExcelJS from 'exceljs';
 
 import { runCli } from '../src/cli.js';
+import { loadConfig } from '../src/config.js';
 
 async function mkTmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -22,6 +23,61 @@ async function writeWorkbook(dir: string, filename: string, aa: string, bb: stri
 }
 
 describe('CLI 配置迁移（xlsx2tex）', () => {
+  it('loadConfig 会读取并规范化原版风格的嵌套 YAML', async () => {
+    const dir = await mkTmpDir('pubtab-ts-cli-config-nested-');
+    const cfgPath = path.join(dir, 'pubtab.yml');
+    await fs.writeFile(
+      cfgPath,
+      [
+        'theme: three_line',
+        'header_rows: 2',
+        'span_columns: true',
+        'font_size: footnotesize',
+        'col_spec: p{2cm}c',
+        'spacing:',
+        '  tabcolsep: 2.4pt',
+        '  arraystretch: 1.0',
+        '  heavyrulewidth: 1.2pt',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const [cfg] = await loadConfig(cfgPath);
+
+    expect(cfg).toEqual({
+      theme: 'three_line',
+      headerRows: 2,
+      spanColumns: true,
+      fontSize: 'footnotesize',
+      colSpec: 'p{2cm}c',
+      spacing: {
+        tabcolsep: '2.4pt',
+        arraystretch: '1.0',
+        heavyrulewidth: '1.2pt',
+      },
+    });
+  });
+
+  it('loadConfig 会把 header_sep YAML 数组规范化为 headerSep 字符串数组', async () => {
+    const dir = await mkTmpDir('pubtab-ts-cli-config-header-sep-');
+    const cfgPath = path.join(dir, 'pubtab.yml');
+    await fs.writeFile(
+      cfgPath,
+      [
+        'header_sep:',
+        '  - \\cmidrule(lr){1-2}',
+        '  - \\midrule',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const [cfg] = await loadConfig(cfgPath);
+
+    expect(cfg).toEqual({
+      headerSep: ['\\cmidrule(lr){1-2}', '\\midrule'],
+    });
+  });
+
   it('从 --config 读取 xlsx2tex 选项', async () => {
     const dir = await mkTmpDir('pubtab-ts-cli-config-');
     const xlsxPath = await writeWorkbook(dir, 'tables.xlsx', 'MAIN', 'AUX');
@@ -85,7 +141,7 @@ describe('CLI 配置迁移（xlsx2tex）', () => {
     await fs.writeFile(
       cfgPath,
       [
-        'theme: simple',
+        'theme: not-exist-theme',
       ].join('\n'),
       'utf8',
     );
