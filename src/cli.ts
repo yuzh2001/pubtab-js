@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 import { texToExcel, xlsx2tex } from './excel.js';
+import type { Xlsx2TexOptions } from './models.js';
 
 type ParsedArgs = {
   positionals: string[];
@@ -49,7 +51,7 @@ function parseArgs(args: string[]): ParsedArgs {
 function usage(): string {
   return [
     '用法:',
-    '  pubtab xlsx2tex <input> <output> [--sheet <nameOrIndex>] [--caption <text>] [--label <text>] [--position <pos>] [--resizebox <spec>] [--colSpec <spec>] [--headerRows <n>]',
+    '  pubtab xlsx2tex <input> <output> [--config <yaml>] [--sheet <nameOrIndex>] [--caption <text>] [--label <text>] [--position <pos>] [--resizebox <spec>] [--colSpec <spec>] [--headerRows <n>]',
     '  pubtab tex2xlsx <input> <output>',
     '',
     '示例:',
@@ -64,10 +66,123 @@ function asSheet(v: string | undefined): string | number | undefined {
   return v;
 }
 
-function asNumber(v: string | undefined): number | undefined {
-  if (v == null) return undefined;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
+type ConfigValue = string | number | boolean | null;
+type ConfigRecord = Record<string, ConfigValue>;
+
+function stripYamlComment(line: string): string {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (ch === '#' && !inSingle && !inDouble) return line.slice(0, i);
+  }
+  return line;
+}
+
+function unquoteYamlValue(raw: string): string {
+  const s = raw.trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith('\'') && s.endsWith('\''))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+function parseYamlValue(raw: string): ConfigValue {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const unquoted = unquoteYamlValue(trimmed);
+  if (unquoted === '') return '';
+  if (/^(~|null)$/iu.test(unquoted)) return null;
+  if (/^(true|false)$/iu.test(unquoted)) return unquoted.toLowerCase() === 'true';
+  if (/^-?\d+$/u.test(unquoted) || /^-?\d+\.\d+$/u.test(unquoted)) return Number(unquoted);
+  if (/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u.test(unquoted)) return Number(unquoted);
+  return unquoted;
+}
+
+function parseYamlSimple(content: string): ConfigRecord {
+  const result: ConfigRecord = {};
+  const lines = content.split(/\r?\n/u);
+  for (const line of lines) {
+    const trimmedLine = stripYamlComment(line).trim();
+    if (!trimmedLine) continue;
+    const idx = trimmedLine.indexOf(':');
+    if (idx < 0) {
+      throw new Error(`配置解析失败：非法行 ${trimmedLine}`);
+    }
+    const key = trimmedLine.slice(0, idx).trim();
+    const value = trimmedLine.slice(idx + 1).trim();
+    if (!key) {
+      throw new Error(`配置解析失败：非法键 ${trimmedLine}`);
+    }
+    result[key] = parseYamlValue(value);
+  }
+  return result;
+}
+
+async function loadYamlConfig(configPath: string): Promise<ConfigRecord> {
+  const raw = await fs.readFile(configPath, 'utf8');
+  return parseYamlSimple(raw);
+}
+
+function fromConfigSheet(v: unknown): string | number | undefined {
+  if (typeof v === 'number' && Number.isInteger(v)) return v;
+  if (typeof v === 'string' && /^\d+$/u.test(v.trim())) return Number(v.trim());
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  return undefined;
+}
+
+function fromConfigHeaderRows(v: unknown): number | 'auto' | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
+  if (typeof v === 'string') {
+    if (v.trim() === 'auto') return 'auto';
+    const n = Number(v.trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function toXlsx2TexOpts(raw: ConfigRecord, overrides: Record<string, string>): Xlsx2TexOptions {
+  const result: Xlsx2TexOptions = {
+    sheet: fromConfigSheet(raw.sheet),
+    caption: typeof raw.caption === 'string' ? raw.caption : undefined,
+    label: typeof raw.label === 'string' ? raw.label : undefined,
+    position: typeof raw.position === 'string' ? raw.position : undefined,
+    resizebox: typeof raw.resizebox === 'string' ? raw.resizebox : undefined,
+    colSpec: typeof raw.colSpec === 'string' ? raw.colSpec : undefined,
+    headerRows: fromConfigHeaderRows(raw.headerRows),
+  };
+
+  if (overrides.sheet != null) {
+    result.sheet = asSheet(overrides.sheet);
+  }
+  if (overrides.caption != null) {
+    result.caption = overrides.caption;
+  }
+  if (overrides.label != null) {
+    result.label = overrides.label;
+  }
+  if (overrides.position != null) {
+    result.position = overrides.position;
+  }
+  if (overrides.resizebox != null) {
+    result.resizebox = overrides.resizebox;
+  }
+  if (overrides.colSpec != null) {
+    result.colSpec = overrides.colSpec;
+  }
+  if (overrides.headerRows != null) {
+    const n = fromConfigHeaderRows(overrides.headerRows);
+    if (n != null) result.headerRows = n;
+  }
+  return result;
 }
 
 export async function runCli(argv: string[], cwd: string = process.cwd()): Promise<number> {
@@ -99,18 +214,17 @@ export async function runCli(argv: string[], cwd: string = process.cwd()): Promi
 
   try {
     if (cmd === 'xlsx2tex') {
-      const xlsx2texOpts: any = {
-        sheet: asSheet(opts.sheet),
+      const configPath = opts.config;
+      const config = configPath ? await loadYamlConfig(path.resolve(cwd, configPath)) : {};
+      const xlsx2texOpts = toXlsx2TexOpts(config, {
+        sheet: opts.sheet,
         caption: opts.caption,
         label: opts.label,
         position: opts.position,
         resizebox: opts.resizebox,
         colSpec: opts.colSpec,
-      };
-      if (opts.headerRows != null) {
-        const n = asNumber(opts.headerRows);
-        xlsx2texOpts.headerRows = n ?? opts.headerRows;
-      }
+        headerRows: opts.headerRows,
+      });
       await xlsx2tex(input, output, xlsx2texOpts);
       return 0;
     }

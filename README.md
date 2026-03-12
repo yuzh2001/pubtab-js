@@ -52,7 +52,7 @@
 ### CLI / Config
 
 - 已实现（最小可用）CLI：`pubtab xlsx2tex/tex2xlsx`（支持 `--sheet/--caption/--label/--position/--resizebox/--colSpec/--headerRows`）。
-- TODO：未实现 YAML config（原版支持 config + 显式参数覆盖）。
+- 已实现：`pubtab xlsx2tex` 的 `--config`（YAML）及命令行显式参数覆盖。
 
 ## API（当前）
 
@@ -101,7 +101,7 @@ npm run build
 - `test_read_excel_trims_*`：Excel 读取裁剪逻辑（我们已覆盖核心裁剪，但尚未逐条迁移所有原版测试）。
 - `test_tex_reader_*` 大量容错与语义解析用例（我们目前只做最小解析与保守剥壳）。
 - `test_render_*`：three_line 主题渲染细节、特殊字符、section row 规则、unicode 下标等（我们 renderer 尚未对齐）。
-- `test_load_config_*`：YAML config 行为（我们未实现）。
+- `test_load_config_*`：YAML config 行为（已迁移 `--config` 与覆盖语义，待补充更多原版边界用例）。
 
 ## 目录与参考
 

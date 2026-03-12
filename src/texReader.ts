@@ -268,6 +268,12 @@ function parseCell(raw: string): Cell {
     value = mr.content;
   }
 
+  const diag = value.match(/^\\diagbox\{([^{}]+)\}\{([^{}]+)\}$/u);
+  if (diag) {
+    style.diagbox = [diag[1], diag[2]];
+    value = '';
+  }
+
   // Unwrap wrappers that otherwise leak into prefixes.
   value = unwrapMakebox(value);
   value = unwrapInnerTabular(value);
@@ -313,7 +319,10 @@ function parseCell(raw: string): Cell {
     value = fmt.text;
   }
 
+  value = value.replace(/\\\\([#%&])/g, '\\$1').trim();
   value = stripLatexWrappers(value).trim();
+  value = value.replace(/\\\\([#%&])/g, '\\$1').trim();
+  value = value.replace(/\\([#%&])/g, '$1').trim();
 
   const numeric = Number(value);
   const finalValue = Number.isFinite(numeric) && value !== '' ? numeric : value;
@@ -405,6 +414,125 @@ function stripLatexCommentsPreservingEscapes(input: string): string {
   return out.join('\n');
 }
 
+function normalizeDecorativeLines(input: string): string {
+  const decoToken = /-\\\/(?:-\\\/)+/u; // e.g. -\/-\/-\/
+  const lines = input.split(/\r?\n/u);
+  const out: string[] = [];
+  const isPureDecorLine = (compact: string): boolean => /^-(?:\\\/-){2,}$/u.test(compact);
+  const isLabelLine = (line: string): boolean => /^[A-Za-z][A-Za-z .'\-]{0,40}$/u.test(line.trim());
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const compact = line.replace(/\s/gu, '');
+    if (!compact) {
+      out.push(line);
+      continue;
+    }
+
+    const next = (lines[i + 1] ?? '').trim();
+    const nextIsMultirow = /^\\multirow/gu.test(next);
+    const nextIsPureDecor = (() => {
+      const nextCompact = next.replace(/\s/gu, '');
+      return isPureDecorLine(nextCompact);
+    })();
+    const hasDecorative = /-\\\/(?:-\\\/)+/u.test(compact);
+
+    if (isLabelLine(line) && nextIsPureDecor) {
+      continue;
+    }
+    if (hasDecorative) {
+      if (isPureDecorLine(compact) || (isLabelLine(line) && nextIsPureDecor) || nextIsMultirow) {
+        continue;
+      }
+      const cleaned = line.replace(decoToken, '').trim();
+      if (cleaned) {
+        out.push(cleaned);
+      }
+      continue;
+    }
+
+    if (decoToken.test(compact)) {
+      if (isLabelLine(line)) {
+        const cleaned = line.replace(decoToken, '').trim();
+        if (cleaned) out.push(cleaned);
+        continue;
+      }
+      const cleaned = line.replace(decoToken, '').trim();
+      if (cleaned) out.push(cleaned);
+      continue;
+    }
+
+    out.push(line);
+  }
+
+  return out.join('\n');
+}
+
+function rowPayloadCount(row: Cell[], startCol = 0): number {
+  if (startCol >= row.length) return 0;
+  let n = 0;
+  for (let i = startCol; i < row.length; i += 1) {
+    if (cellHasPayload(row[i])) n += 1;
+  }
+  return n;
+}
+
+function mergeVisualMultirow(
+  rows: Cell[][],
+  headerRows: number,
+  hlineBefore: boolean[],
+): void {
+  if (rows.length <= headerRows + 1) return;
+  const numRows = rows.length;
+
+  for (let r = headerRows; r < numRows; r += 1) {
+    const cell = rows[r][0];
+    if (!cellHasPayload(cell) || (cell.rowspan ?? 1) > 1) continue;
+
+    const bgColor = cell.style.bgColor;
+    if (!bgColor && rowPayloadCount(rows[r], 1) < 2) continue;
+
+    let top = r;
+    while (top > headerRows) {
+      if (hlineBefore[top]) break;
+      if (hlineBefore[top - 1]) break;
+      const above = rows[top - 1][0];
+      if (cellHasPayload(above)) break;
+      if (bgColor) {
+        if ((above.style.bgColor ?? '') !== bgColor) break;
+      } else {
+        if (above.style.bgColor) break;
+        if (rowPayloadCount(rows[top - 1], 1) < 2) break;
+      }
+      top -= 1;
+    }
+
+    let bottom = r;
+    while (bottom < numRows - 1) {
+      const below = rows[bottom + 1][0];
+      if (cellHasPayload(below)) break;
+      if (bgColor) {
+        if ((below.style.bgColor ?? '') !== bgColor) break;
+      } else {
+        if (below.style.bgColor) break;
+        if (rowPayloadCount(rows[bottom + 1], 1) < 2) break;
+      }
+      if (bottom + 1 < hlineBefore.length && hlineBefore[bottom + 1]) break;
+      bottom += 1;
+    }
+
+    const span = bottom - top + 1;
+    if (span <= 1) continue;
+    rows[top][0] = { ...cell, rowspan: span };
+    if (top !== r) {
+      rows[r][0] = emptyCell();
+    }
+    for (let clearRow = top + 1; clearRow <= bottom; clearRow += 1) {
+      rows[clearRow][0] = emptyCell();
+    }
+  }
+}
+
 function extractTabularAll(tex: string): string[] {
   const out: string[] = [];
   let i = 0;
@@ -468,6 +596,15 @@ function splitByDoubleBackslashLikePython(input: string): string[] {
       continue;
     }
     if (ch === '\\' && input[i + 1] === '\\' && depth === 0) {
+      // Keep inline `\\&` as literal, but not row breaks to the next line.
+      if (input[i + 2] === '&' && input[i - 1] !== '\\') {
+        cur += '\\\\';
+        continue;
+      }
+
+      let after = i + 2;
+      while (after < input.length && /\s/u.test(input[after])) after += 1;
+
       parts.push(cur);
       cur = '';
       i += 1; // consume second slash
@@ -503,39 +640,56 @@ function stripRowRuleCommandsLikePython(chunk: string): { cleaned: string; hasHl
 }
 
 function parseTabularBody(bodyRaw: string): TableData {
-  const body = replaceTabularEnvs(
-    stripLatexCommentsPreservingEscapes(bodyRaw),
-    // Convert nested tabular blocks (used as line breaks) into plain content.
-    (inner) => inner.replace(/\\\\/g, '\n'),
-  )
-    .replace(/\\toprule(?:\[[^\]]+\])?|\\midrule|\\bottomrule(?:\[[^\]]+\])?|\\hline/gu, '')
-    .trim();
+  const rawNoComments = stripLatexCommentsPreservingEscapes(bodyRaw);
+  const body = normalizeDecorativeLines(
+    replaceTabularEnvs(
+      rawNoComments,
+      // Convert nested tabular blocks (used as line breaks) into plain content.
+      (inner) => inner.replace(/\\\\/g, '\n'),
+    )
+      .replace(/\\toprule(?:\[[^\]]+\])?|\\midrule|\\bottomrule(?:\[[^\]]+\])?/gu, '')
+      .trim(),
+  );
 
   // Row split that matches pubtab-python: keep explicit empty/rule-only rows as "" so
   // multirow headers can retain their required spacer line.
   const rawChunks = splitByDoubleBackslashLikePython(body);
   const rows: Array<Cell[] | { kind: 'spacer'; hasHlineBefore: boolean }> = [];
+  const rowHlineFlags: boolean[] = [];
+  let pendingBoundary = false;
   for (const chunk of rawChunks) {
     const { cleaned, hasHlineBefore, originalEmpty } = stripRowRuleCommandsLikePython(chunk);
     if (cleaned) {
+      if (pendingBoundary && rows.length > 0 && rowHlineFlags.length > 0) {
+        rowHlineFlags[rowHlineFlags.length - 1] = true;
+      }
       // Strip leading rowcolor so the first cell parses correctly.
       const r = cleaned.replace(/^\s*\\rowcolor(?:\[[^\]]+\])?\{[^}]+\}\s*/u, '').trim();
       // Some docx exports escape every separator as `\&`; if there are no real '&' but many '\&',
       // treat them as separators (Python does this in `_parse_row`).
       const sepRow = !/(^|[^\\])&/u.test(r) && (r.match(/\\&/gu) ?? []).length >= 2 ? r.replace(/\\&/g, '&') : r;
       rows.push(splitUnescaped(sepRow, '&').map((c) => parseCell(c)));
+      rowHlineFlags.push(pendingBoundary || hasHlineBefore);
+      pendingBoundary = false;
       continue;
     }
-    if (originalEmpty || hasHlineBefore) rows.push({ kind: 'spacer', hasHlineBefore });
+    if (originalEmpty || hasHlineBefore) {
+      rows.push({ kind: 'spacer', hasHlineBefore: pendingBoundary || hasHlineBefore });
+      rowHlineFlags.push(pendingBoundary || hasHlineBefore);
+    }
+    if (hasHlineBefore) pendingBoundary = true;
   }
-
   // Expand multicolumn and insert placeholders for multirow so each row becomes a rectangular grid.
   const activeRowspans: number[] = [];
   const activeRowspanPayload: boolean[] = [];
   const expanded: Cell[][] = [];
+  const expandedHlineBefore: boolean[] = [];
   let maxCols = 0;
+  let lastDataRawWidth = 0;
 
-  for (const rawCells of rows) {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const rawCells = rows[rowIndex];
+    const hasHlineBefore = rowHlineFlags[rowIndex] ?? false;
     if (!Array.isArray(rawCells)) {
       // Keep spacer rows only when required by an active rowspan whose master had payload.
       const keep = activeRowspans.some((n, i) => (n ?? 0) > 0 && Boolean(activeRowspanPayload[i]));
@@ -550,10 +704,13 @@ function parseTabularBody(bodyRaw: string): TableData {
         }
       }
       expanded.push(outRow);
+      expandedHlineBefore.push(hasHlineBefore);
       continue;
     }
     const rawWidth = rawCells.reduce((sum, c) => sum + Math.max(1, c.colspan || 1), 0);
+
     const expectedCols = Math.max(maxCols, rawWidth, 1);
+    lastDataRawWidth = rawWidth;
 
     let remainingRawWidth = rawWidth;
     let rawIdx = 0;
@@ -645,6 +802,7 @@ function parseTabularBody(bodyRaw: string): TableData {
 
     maxCols = Math.max(maxCols, outRow.length);
     expanded.push(outRow);
+    expandedHlineBefore.push(hasHlineBefore);
   }
 
   const numCols = Math.max(maxCols, 1);
@@ -652,6 +810,7 @@ function parseTabularBody(bodyRaw: string): TableData {
     while (r.length < numCols) r.push(emptyCell());
   }
 
+  mergeVisualMultirow(expanded, 1, expandedHlineBefore);
   return {
     cells: expanded,
     numRows: expanded.length,
