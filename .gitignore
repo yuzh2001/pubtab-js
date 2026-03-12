@@ -1,8 +1,12 @@
 node_modules/
 dist/
+dist-playground/
 .vitest/
+.playwright-cli/
 *.log
 .DS_Store
 
 .pubtab-python
 .tmp
+tests/browser/__screenshots__/
+playground-after-*.yaml

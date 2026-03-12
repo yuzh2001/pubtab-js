@@ -1,15 +1,22 @@
 {
-  "name": "pubtab-node",
+  "name": "pubtab-js",
   "version": "0.1.0",
-  "description": "TypeScript toolkit and CLI for converting tables between Excel and LaTeX. Inspired by Python module pubtab.",
+  "description": "TypeScript toolkit and dual-runtime package for converting tables between Excel and LaTeX. Inspired by Python module pubtab.",
   "packageManager": "pnpm@9.15.9",
   "main": "dist/index.js",
   "scripts": {
     "test": "vitest run",
+    "test:node": "vitest run --project node",
+    "test:browser": "vitest run --project browser",
     "build": "tsc -p tsconfig.json",
     "dev": "vitest",
+    "playground": "pnpm --dir playground dev",
+    "build:playground": "pnpm --dir playground build",
     "prepublishOnly": "pnpm test && pnpm build"
   },
+  "workspaces": [
+    "playground"
+  ],
   "keywords": [
     "latex",
     "excel",
@@ -26,8 +33,18 @@
   "type": "module",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    }
+  },
   "bin": {
-    "pubtab-node": "dist/cli.js"
+    "pubtab-js": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -37,6 +54,10 @@
   },
   "devDependencies": {
     "@types/node": "^25.4.0",
+    "@vitest/browser-playwright": "^4.0.18",
+    "@vitest/browser-preview": "^4.0.18",
+    "jsdom": "^28.1.0",
+    "playwright": "^1.58.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }

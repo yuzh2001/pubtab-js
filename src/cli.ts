@@ -51,12 +51,12 @@ function parseArgs(args: string[]): ParsedArgs {
 function usage(): string {
   return [
     '用法:',
-    '  pubtab-node xlsx2tex <input> <output> [--config <yaml>] [--sheet <nameOrIndex>] [--theme <name>] [--caption <text>] [--label <text>] [--position <pos>] [--resizebox <spec>] [--colSpec <spec>] [--headerRows <n>]',
-    '  pubtab-node tex2xlsx <input> <output>',
+    '  pubtab-js xlsx2tex <input> <output> [--config <yaml>] [--sheet <nameOrIndex>] [--theme <name>] [--caption <text>] [--label <text>] [--position <pos>] [--resizebox <spec>] [--colSpec <spec>] [--headerRows <n>]',
+    '  pubtab-js tex2xlsx <input> <output>',
     '',
     '示例:',
-    '  pubtab-node xlsx2tex table.xlsx out/table.tex --sheet 0 --caption "My Table" --label tab:my --position htbp',
-    '  pubtab-node tex2xlsx table.tex out/table.xlsx',
+    '  pubtab-js xlsx2tex table.xlsx out/table.tex --sheet 0 --caption "My Table" --label tab:my --position htbp',
+    '  pubtab-js tex2xlsx table.tex out/table.xlsx',
   ].join('\n');
 }
 
@@ -220,12 +220,12 @@ export async function runCli(argv: string[], cwd: string = process.cwd()): Promi
     if (cmd === 'xlsx2tex') {
       const configPath = opts.config;
       const config = configPath ? await loadYamlConfig(path.resolve(cwd, configPath)) : {};
-          const xlsx2texOpts = toXlsx2TexOpts(config, {
-            sheet: opts.sheet,
-            theme: opts.theme,
-            caption: opts.caption,
-            label: opts.label,
-            position: opts.position,
+      const xlsx2texOpts = toXlsx2TexOpts(config, {
+        sheet: opts.sheet,
+        theme: opts.theme,
+        caption: opts.caption,
+        label: opts.label,
+        position: opts.position,
         resizebox: opts.resizebox,
         colSpec: opts.colSpec,
         headerRows: opts.headerRows,
