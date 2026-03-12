@@ -596,15 +596,6 @@ function splitByDoubleBackslashLikePython(input: string): string[] {
       continue;
     }
     if (ch === '\\' && input[i + 1] === '\\' && depth === 0) {
-      // Keep inline `\\&` as literal, but not row breaks to the next line.
-      if (input[i + 2] === '&' && input[i - 1] !== '\\') {
-        cur += '\\\\';
-        continue;
-      }
-
-      let after = i + 2;
-      while (after < input.length && /\s/u.test(input[after])) after += 1;
-
       parts.push(cur);
       cur = '';
       i += 1; // consume second slash
@@ -640,16 +631,38 @@ function stripRowRuleCommandsLikePython(chunk: string): { cleaned: string; hasHl
 }
 
 function parseTabularBody(bodyRaw: string): TableData {
-  const rawNoComments = stripLatexCommentsPreservingEscapes(bodyRaw);
-  const body = normalizeDecorativeLines(
-    replaceTabularEnvs(
-      rawNoComments,
-      // Convert nested tabular blocks (used as line breaks) into plain content.
-      (inner) => inner.replace(/\\\\/g, '\n'),
-    )
-      .replace(/\\toprule(?:\[[^\]]+\])?|\\midrule|\\bottomrule(?:\[[^\]]+\])?/gu, '')
-      .trim(),
+  let body = stripLatexCommentsPreservingEscapes(bodyRaw);
+
+  // Strip \iffalse...\fi blocks before row splitting (they can span multiple rows).
+  body = body.replace(/\\iffalse\b[\s\S]*?\\fi\b\s*/gu, '');
+
+  // Repair common docx-induced line-break corruption:
+  // `\\\Word` should be `\\Word` (row break + next-row text), not `\Word` command residue.
+  // Keep rule commands (`\\\hline`, `\\\cline`, ...) intact.
+  body = body.replace(
+    /(?:\\){3}(?=(?!hline\b|cline\b|cdashline\b|cdashlinelr\b|cmidrule\b|toprule\b|midrule\b|bottomrule\b)[A-Za-z0-9(])/gu,
+    '\\\\',
   );
+
+  // Normalize malformed escapes from docx/OCR exports (ported from pubtab-python).
+  // 1) Numeric percent patterns like `27.0\\%` -> `27.0\%` when `%` is followed by a boundary.
+  body = body.replace(/(?<=[0-9])\\\\(?=%(?:\s*(?:&|\\\\|$)))/gu, '\\');
+  // 2) Mid-row percent header artifacts like `& \\% Diff &` -> `& \% Diff &` (restrict to `% <word>`).
+  body = body.replace(
+    /&(\s*)\\\\(%\s+[A-Za-z](?:[^\\\n]|\\(?!\\))*?)&/gu,
+    '&$1\\$2&',
+  );
+  // 3) Cell-start hash patterns like `& \\#P` -> `& \#P`.
+  body = body.replace(/(^|[&\n])(\s*)\\\\(?=#)/gu, '$1$2\\');
+  // 4) `\\&` is ambiguous; only normalize alnum\\&alnum to \& (keep row-boundary `\\&` intact).
+  body = body.replace(/(?<=[A-Za-z0-9])\\\\&(?=[A-Za-z0-9])/gu, '\\&');
+
+  // Convert nested tabular blocks (used for in-cell line breaks) into plain content with \n
+  // before row splitting, so inner `\\` won't be treated as row separators.
+  body = replaceTabularEnvs(body, (inner) => inner.replace(/\\\\/g, '\n'));
+
+  // Drop decorative separator artifacts that pollute the first data column.
+  body = normalizeDecorativeLines(body.trim());
 
   // Row split that matches pubtab-python: keep explicit empty/rule-only rows as "" so
   // multirow headers can retain their required spacer line.

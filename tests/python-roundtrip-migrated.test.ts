@@ -306,7 +306,7 @@ describe('migrated python: round-trip tests', () => {
       expect(table.cells[0][1].value).toBe('');
     });
 
-    it.skip('test_read_excel_trims_trailing_columns_even_with_wide_merged_title', async () => {
+    it('test_read_excel_trims_trailing_columns_even_with_wide_merged_title', async () => {
       const dir = await mkTmpDir('pubtab-ts-migrate-trim-merge-');
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet();
@@ -325,16 +325,16 @@ describe('migrated python: round-trip tests', () => {
     });
   });
 
-  describe.skip('tex_reader', () => {
+  describe('tex_reader', () => {
     it('test_tex_reader_comments', () => {
-      const tex = `
-\\begin{tabular}{cc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{cc}
+\toprule
 A & B \\ % header comment
-\\midrule
+\midrule
 1 & 2 \\ % data comment
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(2);
@@ -342,14 +342,14 @@ A & B \\ % header comment
     });
 
     it('test_tex_reader_multicolumn', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
-\\multicolumn{2}{c}{Header} & C \\
-\\midrule
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
+\multicolumn{2}{c}{Header} & C \\
+\midrule
 a & b & c \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.cells[0][0].colspan).toBe(2);
@@ -357,39 +357,39 @@ a & b & c \\
     });
 
     it('test_tex_reader_multirow', () => {
-      const tex = `
-\\begin{tabular}{cc}
-\\toprule
-\\multirow{2}{*}{A} & B \\
+      const tex = String.raw`
+\begin{tabular}{cc}
+\toprule
+\multirow{2}{*}{A} & B \\
  & C \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.cells[0][0].rowspan).toBe(2);
     });
 
     it('test_tex_reader_diagbox', () => {
-      const tex = `
-\\begin{tabular}{cc}
-\\toprule
-\\diagbox{Row}{Col} & Data \\
-\\midrule
+      const tex = String.raw`
+\begin{tabular}{cc}
+\toprule
+\diagbox{Row}{Col} & Data \\
+\midrule
 a & 1 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.cells[0][0].style.diagbox).toEqual(['Row', 'Col']);
     });
 
     it('test_tex_reader_formatting', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
-\\textbf{Bold} & \\textit{Italic} & \\underline{Under} \\
-\\bottomrule
-\\end{tabular}
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
+\textbf{Bold} & \textit{Italic} & \underline{Under} \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.cells[0][0].style.bold).toBe(true);
@@ -398,50 +398,50 @@ a & 1 \\
     });
 
     it('test_tex_reader_math_cleanup', () => {
-      const tex = `
-\\begin{tabular}{c}
-\\toprule
-$D_\\text{stage 1}$ \\
-\\bottomrule
-\\end{tabular}
+      const tex = String.raw`
+\begin{tabular}{c}
+\toprule
+$D_\text{stage 1}$ \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.cells[0][0].value).toBe('D_stage 1');
     });
 
     it('test_tex_reader_pm_spacing', () => {
-      const tex = `
-\\begin{tabular}{c}
-\\toprule
-0.626 {$\\pm$0.018} \\
-\\bottomrule
-\\end{tabular}
+      const tex = String.raw`
+\begin{tabular}{c}
+\toprule
+0.626 {$\pm$0.018} \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(String(table.cells[0][0].value)).toContain('0.626±0.018');
     });
 
     it('test_tex_reader_makecell_hyphen_linebreak_preserved', () => {
-      const tex = `
-\\begin{tabular}{c}
-\\toprule
-\\makecell{Things-\\\\EEG} \\
-\\bottomrule
-\\end{tabular}
+      const tex = String.raw`
+\begin{tabular}{c}
+\toprule
+\makecell{Things-\\EEG} \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.cells[0][0].value).toBe('Things-\nEEG');
     });
 
     it('test_tex_reader_malformed_double_backslash_percent_does_not_split_row', () => {
-      const tex = `
-\\begin{tabular}{cccc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{cccc}
+\toprule
 Model & Chat & Delta & Score \\
-\\midrule
+\midrule
 M1 & 68.2 & 27.0\\% & 83.2 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(2);
@@ -449,14 +449,14 @@ M1 & 68.2 & 27.0\\% & 83.2 \\
     });
 
     it('test_tex_reader_malformed_double_backslash_percent_keeps_header_cell', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
 Metric & \\% Diff & Score \\
-\\midrule
+\midrule
 M1 & 2.4\\% & 88.0 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(2);
@@ -465,14 +465,14 @@ M1 & 2.4\\% & 88.0 \\
     });
 
     it('test_tex_reader_malformed_double_backslash_hash_keeps_header', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
 Depth & \\#P (M) & Score \\
-\\midrule
+\midrule
 18 & 11.23 & 86.41 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(2);
@@ -480,14 +480,14 @@ Depth & \\#P (M) & Score \\
     });
 
     it('test_tex_reader_rowbreak_followed_by_hash_is_not_collapsed', () => {
-      const tex = `
-\\begin{tabular}{cc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{cc}
+\toprule
 A & B \\
-\\midrule
+\midrule
 v1 & v2\\#Tag & 1 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(3);
@@ -496,14 +496,14 @@ v1 & v2\\#Tag & 1 \\
     });
 
     it('test_tex_reader_rowbreak_followed_by_percent_is_not_collapsed', () => {
-      const tex = `
-\\begin{tabular}{cc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{cc}
+\toprule
 A & B \\
-\\midrule
+\midrule
 v1 & v2\\%Tag & 1 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(3);
@@ -512,28 +512,28 @@ v1 & v2\\%Tag & 1 \\
     });
 
     it('test_tex_reader_malformed_double_backslash_ampersand_keeps_single_row', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
 Method & Input & Score \\
-\\midrule
+\midrule
 OpenOcc & C\\&L & 70.59 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(2);
       expect(table.cells[1][1].value).toBe('C&L');
-      expect(table.cells[1][2].value).toBe('70.59');
+      expect(table.cells[1][2].value).toBe(70.59);
     });
 
     it('test_tex_reader_all_delimiters_escaped_as_ampersand_are_recovered', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
-A \\& B \\& C \\
-\\bottomrule
-\\end{tabular}
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
+A \& B \& C \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(1);
@@ -544,30 +544,30 @@ A \\& B \\& C \\
     });
 
     it('test_tex_reader_rowbreak_followed_by_ampersand_is_not_collapsed', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
 M & NQ & ARC-C \\
-\\midrule
-\\multirow{2}{*}{Ours(Yi-6B)} & 23.28 & 76.54\\&\\(\\textcolor{green}{+0.73}\\)&\\(\\textcolor{green}{+3.33}\\) \\
-\\bottomrule
-\\end{tabular}
+\midrule
+\multirow{2}{*}{Ours(Yi-6B)} & 23.28 & 76.54\\&(\textcolor{green}{+0.73})&(\textcolor{green}{+3.33}) \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(3);
-      expect(table.cells[1][2].value).toBe('76.54');
+      expect(table.cells[1][2].value).toBe(76.54);
       expect(table.cells[2][1].value).toBe('(+0.73)');
       expect(table.cells[2][2].value).toBe('(+3.33)');
     });
 
     it('test_tex_reader_triple_backslash_rule_commands_not_leaked', () => {
-      const tex = `
-\\begin{tabular}{ll}
-\\toprule
-A & B \\\\hline
-C & D \\\\cline{1-2}
-E & F \\\\bottomrule[0.8pt]
-\\end{tabular}
+      const tex = String.raw`
+\begin{tabular}{ll}
+\toprule
+A & B \\\hline
+C & D \\\cline{1-2}
+E & F \\\bottomrule[0.8pt]
+\end{tabular}
 `;
       const table = readTex(tex);
       const values = table.cells.flat().map((c) => String(c.value).trim()).filter(Boolean);
@@ -578,29 +578,29 @@ E & F \\\\bottomrule[0.8pt]
     });
 
     it('test_tex_reader_nested_makebox_cleans_to_content', () => {
-      const tex = `
-\\begin{tabular}{c}
-\\toprule
-\\makebox[1.25em][c]{{\\color{ForestGreen}\\textsf{\\textbf{P}}}} \\
-\\bottomrule
-\\end{tabular}
+      const tex = String.raw`
+\begin{tabular}{c}
+\toprule
+\makebox[1.25em][c]{{\color{ForestGreen}\textsf{\textbf{P}}}} \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.cells[0][0].value).toBe('P');
     });
 
     it('test_tex_reader_decorative_separator_block_is_removed', () => {
-      const tex = `
-\\begin{tabular}{ll}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ll}
+\toprule
 Lang & Value \\
-\\midrule
+\midrule
 English
--\\/-\\/-\\/-\\/-\\/--\\/-\\/
-\\multirow{2}{*}{English} & 1 \\
+-\/-\/-\/-\/-\/-\/-\/-
+\multirow{2}{*}{English} & 1 \\
  & 2 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(3);
@@ -610,12 +610,12 @@ English
     });
 
     it('test_tex_reader_mixed_case_dvips_color_is_preserved', () => {
-      const tex = `
-\\begin{tabular}{c}
-\\toprule
-\\makebox[1.25em][c]{{\\color{Dandelion}\\textbf{P}}}\\quad/\\quad\\makebox[1.25em][c]{{\\color{ForestGreen}\\ding{52}}} \\
-\\bottomrule
-\\end{tabular}
+      const tex = String.raw`
+\begin{tabular}{c}
+\toprule
+\makebox[1.25em][c]{{\color{Dandelion}\textbf{P}}}\quad/\quad\makebox[1.25em][c]{{\color{ForestGreen}\ding{52}}} \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       const cell = table.cells[0][0];
@@ -625,16 +625,16 @@ English
     });
 
     it('test_tex_reader_inline_decorative_separator_is_removed', () => {
-      const tex = `
-\\begin{tabular}{ll}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ll}
+\toprule
 Lang & Value \\
-\\midrule
-Korean -\\/-\\/--\\/-\\/--\\/-\\/--\\/-
-\\multirow{2}{*}{Korean} & 1 \\
+\midrule
+Korean -\/-\/-\/-\/-\/-\/-\/-
+\multirow{2}{*}{Korean} & 1 \\
  & 2 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numRows).toBe(3);
@@ -644,14 +644,14 @@ Korean -\\/-\\/--\\/-\\/--\\/-\\/--\\/-
     });
 
     it('test_tex_reader_rich_segments_do_not_leak_makecell_prefix', () => {
-      const tex = `
-\\begin{tabular}{ll}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ll}
+\toprule
 Q & A \\
-\\midrule
-Qwen2 response & \\\begin{tabular}[c]{@{}l@{}}He Ain't Heavy was written by \\textcolor{red}{Mike D\'Abo}. \\ \\cdots\\end{tabular} \\
-\\bottomrule
-\\end{tabular}
+\midrule
+Qwen2 response & \begin{tabular}[c]{@{}l@{}}He Ain't Heavy was written by \textcolor{red}{Mike D\'Abo}. \\ \cdots\end{tabular} \\
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       const cell = table.cells[1][1];
@@ -663,20 +663,20 @@ Qwen2 response & \\\begin{tabular}[c]{@{}l@{}}He Ain't Heavy was written by \\te
     });
 
     it('test_tex_reader_infers_first_column_rowspan_from_blank_continuation_rows', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
 Iter & Balls & Score \\
-\\midrule
+\midrule
 1 & 5 & 0.1 \\
  & 15 & 0.2 \\
  & 30 & 0.3 \\
-\\hline
+\hline
 2 & 5 & 0.4 \\
  & 15 & 0.5 \\
  & 30 & 0.6 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.cells[1][0].rowspan).toBe(3);
@@ -688,14 +688,14 @@ Iter & Balls & Score \\
     });
 
     it('test_tex_reader_preserves_middle_spacer_column', () => {
-      const tex = `
-\\begin{tabular}{ccc}
-\\toprule
+      const tex = String.raw`
+\begin{tabular}{ccc}
+\toprule
 Left &  & Right \\
-\\midrule
+\midrule
 L1 &  & R1 \\
-\\bottomrule
-\\end{tabular}
+\bottomrule
+\end{tabular}
 `;
       const table = readTex(tex);
       expect(table.numCols).toBe(3);

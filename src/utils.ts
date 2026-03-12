@@ -71,6 +71,7 @@ export function stripLatexWrappers(raw: string): string {
   s = s.replace(/\\underline\{([\s\S]*?)\}/gu, '$1');
   s = s.replace(/\\textbf\{([\s\S]*?)\}/gu, '$1');
   s = s.replace(/\\textit\{([\s\S]*?)\}/gu, '$1');
+  s = s.replace(/\\textcolor(?:\[[^\]]+\])?\{[^}]+\}\{([\s\S]*?)\}/gu, '$1');
 
   // Normalize `{$\pm$0.01}` like patterns into unicode ±.
   s = s.replace(/\{\$\s*\\pm\s*\$\s*([0-9.]+)\s*\}/gu, '±$1');

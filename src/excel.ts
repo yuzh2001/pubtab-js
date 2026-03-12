@@ -160,17 +160,6 @@ function trimTrailingEmptyColsLikePython(cells: Cell[][], numCols: number): numb
     for (const row of cells) {
       if (colIdx < 0 || colIdx >= row.length) continue;
       if (isCellPayload(row[colIdx])) return true;
-
-      // Attribute payload from a horizontal placeholder to its left master when the
-      // master's colspan covers this column. This mirrors pubtab-python behavior.
-      for (let i = colIdx - 1; i >= 0; i -= 1) {
-        const left = row[i];
-        if ((left.colspan ?? 1) <= 1) continue;
-        if (i + (left.colspan ?? 1) - 1 >= colIdx) {
-          if (isCellPayload(left)) return true;
-          break;
-        }
-      }
     }
     return false;
   };
