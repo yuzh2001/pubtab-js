@@ -10,6 +10,7 @@ const sheet = ref('');
 const headerRows = ref('auto');
 const caption = ref('');
 const label = ref('');
+const texInput = ref('');
 const error = ref('');
 const texOutput = ref('');
 const result = ref<TableResult | null>(null);
@@ -27,6 +28,9 @@ function cleanupDownloadUrl(): void {
 onBeforeUnmount(() => {
   cleanupDownloadUrl();
 });
+
+const isTexToXlsxMode = computed(() => mode.value === 'tex-to-xlsx');
+const canConvertTexInput = computed(() => texInput.value.trim().length > 0 && !busy.value);
 
 function parseOptions(): Xlsx2TexOptions {
   const opts: Xlsx2TexOptions = {};
@@ -109,12 +113,16 @@ function cellAttrs(cell: TableRenderCell) {
   };
 }
 
-async function handleFile(file: File): Promise<void> {
+function resetOutputs(): void {
   error.value = '';
   texOutput.value = '';
   result.value = null;
   cleanupDownloadUrl();
   downloadName.value = '';
+}
+
+async function handleFile(file: File): Promise<void> {
+  resetOutputs();
   busy.value = true;
   try {
     if (mode.value === 'xlsx-to-tex') {
@@ -142,6 +150,24 @@ async function onFileChange(event: Event): Promise<void> {
   const file = input.files?.[0];
   if (!file) return;
   await handleFile(file);
+}
+
+async function convertTexInput(): Promise<void> {
+  const text = texInput.value.trim();
+  if (!text) return;
+
+  resetOutputs();
+  busy.value = true;
+  try {
+    const converted = await texToXlsx(text, { filename: 'pasted-table.xlsx' });
+    result.value = converted.table;
+    downloadName.value = converted.filename;
+    downloadUrl.value = URL.createObjectURL(converted.blob);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    busy.value = false;
+  }
 }
 </script>
 
@@ -184,7 +210,7 @@ async function onFileChange(event: Event): Promise<void> {
         </label>
 
         <label class="control control-wide">
-          <span>{{ mode === 'xlsx-to-tex' ? 'Upload .xlsx' : 'Upload .tex' }}</span>
+          <span>{{ mode === 'xlsx-to-tex' ? 'Upload .xlsx' : 'Upload .tex (optional)' }}</span>
           <input
             type="file"
             :accept="mode === 'xlsx-to-tex' ? '.xlsx' : '.tex,.txt'"
@@ -192,6 +218,22 @@ async function onFileChange(event: Event): Promise<void> {
             @change="onFileChange"
           />
         </label>
+
+        <div v-if="isTexToXlsxMode" class="control control-wide control-stack">
+          <span>Paste TeX</span>
+          <UTextarea
+            v-model="texInput"
+            :rows="10"
+            autoresize
+            data-testid="tex-input"
+            placeholder="\\begin{tabular}{cc}&#10;A &amp; B \\\\&#10;1 &amp; 2 \\\\&#10;\\end{tabular}"
+          />
+          <div class="action-row">
+            <UButton data-testid="tex-submit" :disabled="!canConvertTexInput" @click="convertTexInput">
+              Convert TeX Text
+            </UButton>
+          </div>
+        </div>
       </section>
 
       <p v-if="busy" class="status" data-testid="busy">Converting...</p>

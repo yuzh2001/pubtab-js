@@ -92,6 +92,10 @@ h2 {
   grid-column: span 2;
 }
 
+.control-stack {
+  align-content: start;
+}
+
 .control span,
 .meta-label {
   font-size: 12px;
@@ -105,6 +109,11 @@ input,
 select,
 a {
   font: inherit;
+}
+
+.action-row {
+  display: flex;
+  justify-content: flex-start;
 }
 
 input,

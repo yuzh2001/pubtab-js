@@ -40,5 +40,7 @@ describe('playground app', () => {
     expect(bundle).toContain('result-table');
     expect(bundle).toContain('Leaf Columns');
     expect(bundle).toContain('Download ');
+    expect(bundle).toContain('tex-input');
+    expect(bundle).toContain('Convert TeX Text');
   });
 });
