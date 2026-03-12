@@ -1,4 +1,4 @@
-# pubtab-node
+# pubtab-js
 
 ![Node >=18](https://img.shields.io/badge/node-%3E%3D18-2f6f3e)
 ![License ISC](https://img.shields.io/badge/license-ISC-1f4b99)
@@ -6,9 +6,15 @@
 
 [`pubtab`](https://github.com/Galaxy-Dawn/pubtab) is a feature-rich, well-tested tool for converting between LaTeX tables and Excel spreadsheets.
 
-`pubtab-node` is a TypeScript port of the original Python `pubtab`, providing two-way conversion between Excel workbooks and LaTeX `tabular`.
+`pubtab-js` is a TypeScript port of the original Python `pubtab`, providing two-way conversion between Excel workbooks and LaTeX `tabular`.
 
-The Node version removes the preview feature from the Python version, while keeping most core capabilities:
+The current package is being shaped as a dual-runtime package:
+
+- Node side: file-path based API and CLI
+- Browser side: single-file, in-memory API built around `ArrayBuffer` / `Blob` / `File`
+- Frontend consumption: structured table results for app-specific rendering
+
+Compared with the Python version, `pubtab-js` currently keeps the core conversion pipeline while omitting preview:
 
 - `.xlsx -> .tex`
 - `.tex -> .xlsx`
@@ -21,19 +27,19 @@ The Node version removes the preview feature from the Python version, while keep
 ### Install the CLI globally
 
 ```bash
-pnpm add -g pubtab-node
+pnpm add -g pubtab-js
 ```
 
 After installation:
 
 ```bash
-pubtab-node --help
+pubtab-js --help
 ```
 
 ### Install as a library
 
 ```bash
-pnpm add pubtab-node
+pnpm add pubtab-js
 ```
 
 ## CLI Usage
@@ -41,20 +47,20 @@ pnpm add pubtab-node
 ### Excel to LaTeX
 
 ```bash
-pubtab-node xlsx2tex table.xlsx out/table.tex
+pubtab-js xlsx2tex table.xlsx out/table.tex
 ```
 
 Export by sheet:
 
 ```bash
-pubtab-node xlsx2tex table.xlsx out/table.tex --sheet 0
-pubtab-node xlsx2tex table.xlsx out/table.tex --sheet Sheet1
+pubtab-js xlsx2tex table.xlsx out/table.tex --sheet 0
+pubtab-js xlsx2tex table.xlsx out/table.tex --sheet Sheet1
 ```
 
 Add caption / label / position:
 
 ```bash
-pubtab-node xlsx2tex table.xlsx out/table.tex \
+pubtab-js xlsx2tex table.xlsx out/table.tex \
   --caption "My Table" \
   --label "tab:my_table" \
   --position htbp
@@ -63,7 +69,7 @@ pubtab-node xlsx2tex table.xlsx out/table.tex \
 ### LaTeX to Excel
 
 ```bash
-pubtab-node tex2xlsx table.tex out/table.xlsx
+pubtab-js tex2xlsx table.tex out/table.xlsx
 ```
 
 ### Use a YAML config file
@@ -81,7 +87,7 @@ spacing:
 ```
 
 ```bash
-pubtab-node xlsx2tex table.xlsx out/table.tex --config pubtab.yml
+pubtab-js xlsx2tex table.xlsx out/table.tex --config pubtab.yml
 ```
 
 Explicit CLI flags override fields with the same name in the config file.
@@ -97,13 +103,13 @@ The config loader accepts both camelCase and the original Python-style snake_cas
 ### CLI help
 
 ```bash
-pubtab-node --help
+pubtab-js --help
 ```
 
 Currently supported top-level commands:
 
-- `pubtab-node xlsx2tex`
-- `pubtab-node tex2xlsx`
+- `pubtab-js xlsx2tex`
+- `pubtab-js tex2xlsx`
 
 ## API Usage
 
@@ -124,7 +130,7 @@ const latexStringNotRecommended =
 ```
 
 ```ts
-import { xlsx2tex, texToExcel, readTex, render } from 'pubtab-node';
+import { xlsx2tex, texToExcel, readTex, render } from 'pubtab-js';
 
 await xlsx2tex('table.xlsx', 'out/table.tex');
 await texToExcel('table.tex', 'out/table.xlsx');
@@ -141,12 +147,39 @@ Main exported APIs:
 - `readTex(tex)`
 - `readTexAll(tex)`
 
+Browser-facing APIs are memory-oriented rather than path-oriented:
+
+- browser input/output is limited to single-file conversion
+- browser APIs will accept `ArrayBuffer`, `Blob`, and `File`
+- browser APIs will return structured table results so frontend apps can decide how to render them
+- CLI remains Node-only
+
+```ts
+import { xlsxToTex, texToXlsx, xlsxToTableResult } from 'pubtab-js/browser';
+
+const xlsxFile = new File([buffer], 'table.xlsx');
+const { tex, table } = await xlsxToTex(xlsxFile, { headerRows: 'auto' });
+
+const workbook = await texToXlsx(tex, { filename: 'table.xlsx' });
+const tableOnly = await xlsxToTableResult(xlsxFile);
+```
+
+`TableResult` is the frontend-oriented shape returned by browser APIs. It includes:
+
+- `columns`: stable column descriptors
+- `rows`: row objects with per-cell display values
+- `headerRows` / `bodyRows`: pre-split sections
+- `spans`: merge/span metadata
+- `table`: original `TableData` for lower-level consumers
+
 ## Current Capabilities
 
 ### Supported
 
 - read `.xlsx` and output `.tex`
 - read `.tex` and output `.xlsx`
+- browser-side single-file in-memory conversion via `pubtab-js/browser`
+- browser-side structured `TableResult` for frontend rendering
 - load the original `three_line` theme config from `themes/three_line/config.yaml`
 - export all worksheets when `sheet` is not specified
 - export a single sheet when requested
@@ -161,6 +194,9 @@ Main exported APIs:
 
 - preview pipeline
 - `.xls` input
+- browser-side local-path I/O
+- browser-side directory batch conversion
+- the full theme system and every rendering detail from the original project
 - full parity for every original edge-case LaTeX layout behavior
 - stronger TeX fault tolerance
 - full support for expanding `definecolor` / `newcommand` macros
@@ -185,11 +221,22 @@ Development environment:
 ```bash
 git clone https://github.com/Galaxy-Dawn/pubtab .pubtab-python # local reference clone of the original Python project; not included in the npm package
 pnpm i
+pnpm test:node
+pnpm test:browser
 pnpm test
 pnpm build
+pnpm build:playground
 ```
 
-This repository is primarily managed with `pnpm`. Prefer `pnpm i`, `pnpm test`, and `pnpm build` for local development and release verification.
+This repository is primarily managed with `pnpm`. Prefer `pnpm i`, `pnpm test`, `pnpm test:browser`, `pnpm build`, and `pnpm build:playground` for local development and release verification.
+
+`pnpm test:browser` currently runs DOM-path browser-facing tests in `jsdom`, covering the browser API surface and playground interactions without relying on local file paths.
+
+To launch the playground locally:
+
+```bash
+pnpm playground
+```
 
 This repository includes fixtures, round-trip tests, CLI config tests, and compatibility tests. The published package ships `dist/` and `themes/`, but does not ship the test directories.
 

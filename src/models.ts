@@ -43,6 +43,62 @@ export interface TableData {
   groupSeparators: GroupSeparators;
 }
 
+export interface TableColumnView {
+  id: string;
+  key: string;
+  index: number;
+  label: string;
+}
+
+export interface TableSpanView {
+  row: number;
+  col: number;
+  rowspan: number;
+  colspan: number;
+}
+
+export interface TableCellView {
+  id: string;
+  rowIndex: number;
+  colIndex: number;
+  columnId: string;
+  value: unknown;
+  text: string;
+  style: CellStyle;
+  richSegments: RichSegment[] | null;
+  rowspan: number;
+  colspan: number;
+  originRowIndex: number;
+  originColIndex: number;
+  isPlaceholder: boolean;
+  section: 'header' | 'body';
+}
+
+export interface TableRowView {
+  id: string;
+  index: number;
+  section: 'header' | 'body';
+  cells: TableCellView[];
+  values: unknown[];
+}
+
+export interface TableViewModel {
+  columns: TableColumnView[];
+  rows: TableRowView[];
+  headerRows: TableRowView[];
+  bodyRows: TableRowView[];
+  grid: TableCellView[][];
+  spans: TableSpanView[];
+  size: {
+    rows: number;
+    cols: number;
+  };
+}
+
+export interface TableResult extends TableViewModel {
+  table: TableData;
+}
+
 export interface RenderOptions {
   caption?: string;
   label?: string;

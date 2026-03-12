@@ -90,7 +90,7 @@ describe('CLI 配置迁移（xlsx2tex）', () => {
     ].join('\n');
     await fs.writeFile(cfgPath, cfg, 'utf8');
 
-    const code = await runCli(['node', 'pubtab-node', 'xlsx2tex', xlsxPath, outPath, '--config', cfgPath]);
+    const code = await runCli(['node', 'pubtab-js', 'xlsx2tex', xlsxPath, outPath, '--config', cfgPath]);
     expect(code).toBe(0);
     const tex = await fs.readFile(outPath, 'utf8');
     expect(tex).toContain('\\caption{Config Caption}');
@@ -116,7 +116,7 @@ describe('CLI 配置迁移（xlsx2tex）', () => {
 
     const code = await runCli([
       'node',
-      'pubtab-node',
+      'pubtab-js',
       'xlsx2tex',
       xlsxPath,
       outPath,
@@ -148,7 +148,7 @@ describe('CLI 配置迁移（xlsx2tex）', () => {
 
     const code = await runCli([
       'node',
-      'pubtab-node',
+      'pubtab-js',
       'xlsx2tex',
       xlsxPath,
       outPath,
@@ -172,7 +172,7 @@ describe('CLI 配置迁移（xlsx2tex）', () => {
 
     const code = await runCli([
       'node',
-      'pubtab-node',
+      'pubtab-js',
       'xlsx2tex',
       xlsxPath,
       outPath,
@@ -191,7 +191,7 @@ describe('CLI 配置迁移（xlsx2tex）', () => {
     const cfgPath = path.join(dir, 'pubtab.yml');
     await fs.writeFile(cfgPath, ':::', 'utf8');
 
-    const code = await runCli(['node', 'pubtab-node', 'xlsx2tex', xlsxPath, outPath, '--config', cfgPath]);
+    const code = await runCli(['node', 'pubtab-js', 'xlsx2tex', xlsxPath, outPath, '--config', cfgPath]);
     expect(code).toBe(2);
   });
 });
